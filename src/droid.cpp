@@ -1841,7 +1841,8 @@ void templateSetParts(const DROID *psDroid, DROID_TEMPLATE *psTemplate)
 }
 
 /* Make all the droids for a certain player a member of a specific group */
-void assignDroidsToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGroup)
+/* If a structure is selected, set its group to which droids will be automatically assigned */
+void assignObjectToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGroup)
 {
 	DROID	*psDroid;
 	bool	bAtLeastOne = false;
@@ -1852,6 +1853,16 @@ void assignDroidsToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGrou
 
 	if (groupNumber < UBYTE_MAX)
 	{
+		/* Run through all the structures */
+		for (STRUCTURE *psStruct : apsStructLists[playerNumber]) 
+		{
+			if (psStruct->selected && psStruct->isFactory()) 
+			{
+				psStruct->productToGroup = (UBYTE)groupNumber;
+				return;
+			}
+		}
+
 		/* Run through all the droids */
 		for (psDroid = apsDroidLists[playerNumber]; psDroid != nullptr; psDroid = psDroid->psNext)
 		{
@@ -1895,14 +1906,23 @@ void assignDroidsToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGrou
 }
 
 
-void removeDroidsFromGroup(UDWORD playerNumber)
+void removeObjectFromGroup(UDWORD playerNumber)
 {
 	DROID	*psDroid;
 	unsigned removedCount = 0;
 
 	ASSERT_OR_RETURN(, playerNumber < MAX_PLAYERS, "Invalid player: %" PRIu32 "", playerNumber);
 
-	for (psDroid = apsDroidLists[playerNumber]; psDroid != nullptr; psDroid = psDroid->psNext)
+	for (STRUCTURE *psStruct : apsStructLists[playerNumber]) 
+	{
+		if (psStruct->selected && psStruct->isFactory()) 
+		{
+			psStruct->productToGroup = UBYTE_MAX;
+			return;
+		}
+	}
+
+	for (DROID* psDroid : apsDroidLists[playerNumber])
 	{
 		if (psDroid->selected)
 		{
