@@ -306,6 +306,16 @@ struct STRUCTURE : public BASE_OBJECT
 	iIMDBaseShape *prebuiltImd;
 	UBYTE productToGroup = UBYTE_MAX;
 
+	bool isFactory() const
+	{
+		ASSERT_OR_RETURN(false, pStructureType != nullptr, "Invalid structureType!");
+
+		return type == OBJ_STRUCTURE && (
+			pStructureType->type == REF_FACTORY ||
+			pStructureType->type == REF_CYBORG_FACTORY ||
+			pStructureType->type == REF_VTOL_FACTORY);
+	}
+
 	inline Vector2i size() const { return pStructureType->size(rot.direction); }
 };
 

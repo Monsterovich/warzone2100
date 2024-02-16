@@ -63,23 +63,26 @@ unset(NETCODE_VERSION_MINOR)
 #	- NETCODE_VERSION_MAJOR: 0x1000
 #	- NETCODE_VERSION_MINOR: 1
 
-if(DEFINED VCS_TAG AND NOT "${VCS_TAG}" STREQUAL "")
-	# We're on an exact tag / tagged release
-	VALIDATE_INTEGER(VCS_TAG_TAG_COUNT)
-	set(NETCODE_VERSION_MAJOR "0x4000")
-	set(NETCODE_VERSION_MINOR ${VCS_TAG_TAG_COUNT})
-else()
-	if("${VCS_BRANCH}" STREQUAL "master")
-		# master branch build
-		VALIDATE_INTEGER(VCS_COMMIT_COUNT)
-		set(NETCODE_VERSION_MAJOR "0x10a0")
-		set(NETCODE_VERSION_MINOR ${VCS_COMMIT_COUNT})
-	else()
-		# any other builds (other branches, forks, etc)
-		set(NETCODE_VERSION_MAJOR "0x1000")
-		set(NETCODE_VERSION_MINOR 1)
-	endif()
-endif()
+# if(DEFINED VCS_TAG AND NOT "${VCS_TAG}" STREQUAL "")
+# 	# We're on an exact tag / tagged release
+# 	VALIDATE_INTEGER(VCS_TAG_TAG_COUNT)
+# 	set(NETCODE_VERSION_MAJOR "0x4000")
+# 	set(NETCODE_VERSION_MINOR ${VCS_TAG_TAG_COUNT})
+# else()
+# 	if("${VCS_BRANCH}" STREQUAL "master")
+# 		# master branch build
+# 		VALIDATE_INTEGER(VCS_COMMIT_COUNT)
+# 		set(NETCODE_VERSION_MAJOR "0x10a0")
+# 		set(NETCODE_VERSION_MINOR ${VCS_COMMIT_COUNT})
+# 	else()
+# 		# any other builds (other branches, forks, etc)
+# 		set(NETCODE_VERSION_MAJOR "0x1000")
+# 		set(NETCODE_VERSION_MINOR 1)
+# 	endif()
+# endif()
+
+set(NETCODE_VERSION_MAJOR "0x4000")
+set(NETCODE_VERSION_MINOR "85")
 
 ##################################
 # Debug output

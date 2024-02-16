@@ -1872,7 +1872,7 @@ void assignObjectToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGrou
 	if (groupNumber < UBYTE_MAX)
 	{
 		/* Run through all the structures */
-		for (STRUCTURE *psStruct : apsStructLists[playerNumber]) 
+		for (auto psStruct = apsStructLists[playerNumber]; psStruct != nullptr; psStruct = psStruct->psNext) 
 		{
 			if (psStruct->selected && psStruct->isFactory()) 
 			{
@@ -1927,12 +1927,11 @@ void assignObjectToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGrou
 
 void removeObjectFromGroup(UDWORD playerNumber)
 {
-	DROID	*psDroid;
 	unsigned removedCount = 0;
 
 	ASSERT_OR_RETURN(, playerNumber < MAX_PLAYERS, "Invalid player: %" PRIu32 "", playerNumber);
 
-	for (STRUCTURE *psStruct : apsStructLists[playerNumber]) 
+	for (auto psStruct = apsStructLists[playerNumber]; psStruct != nullptr; psStruct = psStruct->psNext) 
 	{
 		if (psStruct->selected && psStruct->isFactory()) 
 		{
@@ -1941,7 +1940,7 @@ void removeObjectFromGroup(UDWORD playerNumber)
 		}
 	}
 
-	for (DROID* psDroid : apsDroidLists[playerNumber])
+	for (auto psDroid = apsDroidLists[playerNumber]; psDroid != nullptr; psDroid = psDroid->psNext)
 	{
 		if (psDroid->selected)
 		{
