@@ -3511,7 +3511,7 @@ void SelectDroid(DROID *psDroid)
 void SelectNewDroid(DROID *psNewDroid)
 {
 	std::vector<DROID *> groupDroids;
-	for (DROID *psDroid : apsDroidLists[psNewDroid->player])
+	for (DROID *psDroid = apsDroidLists[psNewDroid->player]; psDroid != nullptr; psDroid = psDroid->psNext)
 	{
 		if (psDroid->group == psNewDroid->group)
 		{
