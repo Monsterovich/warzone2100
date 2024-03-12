@@ -3515,7 +3515,7 @@ void SelectDroid(DROID *psDroid, bool programmaticSelection)
 void SelectGroupDroid(DROID *psGroupDroid)
 {
 	std::vector<DROID *> groupDroids;
-	for (DROID *psDroid = apsDroidLists[psNewDroid->player]; psDroid != nullptr; psDroid = psDroid->psNext)
+	for (DROID *psDroid = apsDroidLists[psGroupDroid->player]; psDroid != nullptr; psDroid = psDroid->psNext)
 	{
 		// skip itself because psGroupDroid may already exist in apsDroidLists
 		if (psDroid == psGroupDroid)
