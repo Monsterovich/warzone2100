@@ -1232,7 +1232,7 @@ void droidWasFullyRepairedAny(DROID *psDroid)
 	{
 		psDroid->group = psDroid->repairGroup;
 		psDroid->repairGroup = UBYTE_MAX;
-		SelectNewDroid(psDroid);
+		SelectGroupDroid(psDroid);
 		intGroupsChanged(psDroid->group); // update groups UI
 	}
 }
@@ -3507,19 +3507,19 @@ void SelectDroid(DROID *psDroid)
 	jsDebugSelected(psDroid);
 }
 
-// If the whole group is selected, add new droids of psNewDroid group to the selection after production
+// If all other droids with psGroupDroid's group are selected, add psGroupDroid to the selection after production/repair/etc.
 //
-void SelectNewDroid(DROID *psNewDroid)
+void SelectGroupDroid(DROID *psGroupDroid)
 {
 	std::vector<DROID *> groupDroids;
 	for (DROID *psDroid = apsDroidLists[psNewDroid->player]; psDroid != nullptr; psDroid = psDroid->psNext)
 	{
-		// skip itself
-		if (psDroid == psNewDroid)
+		// skip itself because psGroupDroid may already exist in apsDroidLists
+		if (psDroid == psGroupDroid)
 		{
 			continue;
 		}
-		if (psDroid->group == psNewDroid->group)
+		if (psDroid->group == psGroupDroid->group)
 		{
 			groupDroids.push_back(psDroid);
 		}
@@ -3539,7 +3539,7 @@ void SelectNewDroid(DROID *psNewDroid)
 
 		if (bDoSelection)
 		{
-			SelectDroid(psNewDroid);
+			SelectDroid(psGroupDroid);
 		}
 	}
 }

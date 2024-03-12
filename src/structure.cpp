@@ -2505,7 +2505,7 @@ static bool structPlaceDroid(STRUCTURE *psStructure, DROID_TEMPLATE *psTempl, DR
 			{
 				psNewDroid->group = psStructure->productToGroup;
 				intGroupsChanged(psNewDroid->group); // update groups UI
-				SelectNewDroid(psNewDroid);
+				SelectGroupDroid(psNewDroid);
 			}
 			else
 			{
