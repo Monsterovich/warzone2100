@@ -54,7 +54,7 @@ function getDroidsForCOLZ()
 	}
 	else
 	{
-		templates = [cTempl.cohct, cTempl.commrl, cTempl.comorb];
+		templates = (!camClassicMode()) ? [cTempl.cohct, cTempl.commrl, cTempl.comorb] : [cTempl.cohct, cTempl.commc, cTempl.comorb];
 		usingHeavy = true;
 	}
 
@@ -139,7 +139,7 @@ function sendPlayerTransporter()
 function mapEdgeDroids()
 {
 	const TANK_NUM = 8 + camRand(6);
-	const list = [cTempl.npcybm, cTempl.npcybr, cTempl.commrp, cTempl.cohct];
+	const list = (!camClassicMode()) ? [cTempl.npcybm, cTempl.npcybr, cTempl.commrp, cTempl.cohct] : [cTempl.npcybm, cTempl.npcybr, cTempl.commc, cTempl.cohct];
 
 	const droids = [];
 	for (let i = 0; i < TANK_NUM; ++i)
@@ -174,15 +174,23 @@ function wave3()
 
 function vtolAttack()
 {
-	const list = [cTempl.colpbv, cTempl.colpbv];
-	const ext = {
-		limit: [2, 2], //paired with list array
-		alternate: true,
-		altIdx: 0
-	};
-	camSetVtolData(CAM_THE_COLLECTIVE, "vtolAppearPos", "vtolRemoveZone", list, camChangeOnDiff(camMinutesToMilliseconds(4)), "COCommandCenter", ext);
-	queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
-	queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	if (camClassicMode())
+	{
+		const list = [cTempl.colcbv, cTempl.colcbv];
+		camSetVtolData(CAM_THE_COLLECTIVE, "vtolAppearPos", "vtolRemoveZone", list, camChangeOnDiff(camMinutesToMilliseconds(3)), "COCommandCenter");
+	}
+	else
+	{
+		const list = [cTempl.colpbv, cTempl.colpbv];
+		const ext = {
+			limit: [2, 2], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_THE_COLLECTIVE, "vtolAppearPos", "vtolRemoveZone", list, camChangeOnDiff(camMinutesToMilliseconds(4)), "COCommandCenter", ext);
+		queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
+		queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	}
 }
 
 function groupPatrol()
@@ -235,24 +243,59 @@ function cam2Setup()
 		"R-Wpn-Rocket-ROF03", "R-Wpn-RocketSlow-Accuracy03",
 		"R-Wpn-RocketSlow-Damage04", "R-Sys-Sensor-Upgrade01"
 	];
+	const collectiveResClassic = [
+		"R-Defense-WallUpgrade03", "R-Struc-Materials03", "R-Struc-Factory-Upgrade03",
+		"R-Vehicle-Engine03", "R-Vehicle-Metals03", "R-Cyborg-Metals03",
+		"R-Vehicle-Armor-Heat01", "R-Cyborg-Armor-Heat01", "R-Cyborg-Armor-Heat01",
+		"R-Wpn-Cannon-Damage03", "R-Wpn-Cannon-ROF01", "R-Wpn-Flamer-Damage03",
+		"R-Wpn-Flamer-ROF01", "R-Wpn-MG-Damage04", "R-Wpn-MG-ROF02",
+		"R-Wpn-Mortar-Damage03", "R-Wpn-Mortar-ROF01", "R-Wpn-Rocket-Accuracy02",
+		"R-Wpn-Rocket-Damage03", "R-Wpn-Rocket-ROF03", "R-Wpn-RocketSlow-Accuracy03",
+		"R-Wpn-RocketSlow-Damage03", "R-Sys-Sensor-Upgrade01"
+	];
 
 	for (let x = 0, l = mis_structsAlpha.length; x < l; ++x)
 	{
 		enableStructure(mis_structsAlpha[x], CAM_HUMAN_PLAYER);
 	}
 
-	camCompleteRequiredResearch(mis_playerResBeta, CAM_HUMAN_PLAYER);
-	camCompleteRequiredResearch(mis_alphaResearchNew, CAM_THE_COLLECTIVE);
-	camCompleteRequiredResearch(collectiveRes, CAM_THE_COLLECTIVE);
-	camCompleteRequiredResearch(mis_alphaResearchNew, CAM_HUMAN_PLAYER);
-
-	if (difficulty >= HARD)
+	if (camClassicMode())
 	{
-		camUpgradeOnMapTemplates(cTempl.commc, cTempl.commrp, CAM_THE_COLLECTIVE);
+		camCompleteRequiredResearch(mis_alphaResearchNewClassic, CAM_HUMAN_PLAYER);
+		camCompleteRequiredResearch(mis_playerResBetaClassic, CAM_HUMAN_PLAYER);
+
+		if (tweakOptions.camClassic_balance32)
+		{
+			camClassicResearch(mis_betaStartingResearchClassic, CAM_HUMAN_PLAYER);
+			completeResearch("CAM2RESEARCH-UNDO", CAM_HUMAN_PLAYER);
+			//The Collective have no research in 3.2
+		}
+		else
+		{
+			completeResearch("CAM2RESEARCH-UNDO-Rockets", CAM_HUMAN_PLAYER);
+			camCompleteRequiredResearch(mis_betaStartingResearchClassic, CAM_HUMAN_PLAYER);
+			camCompleteRequiredResearch(mis_alphaResearchNewClassic, CAM_THE_COLLECTIVE);
+			camCompleteRequiredResearch(collectiveResClassic, CAM_THE_COLLECTIVE);
+		}
+
+		enableResearch("R-Wpn-Cannon-Accuracy02", CAM_HUMAN_PLAYER);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_playerResBeta, CAM_HUMAN_PLAYER);
+		camCompleteRequiredResearch(mis_alphaResearchNew, CAM_THE_COLLECTIVE);
+		camCompleteRequiredResearch(collectiveRes, CAM_THE_COLLECTIVE);
+		camCompleteRequiredResearch(mis_alphaResearchNew, CAM_HUMAN_PLAYER);
+
+		if (difficulty >= HARD)
+		{
+			camUpgradeOnMapTemplates(cTempl.commc, cTempl.commrp, CAM_THE_COLLECTIVE);
+		}
+
+		enableResearch("R-Wpn-Cannon-Damage04", CAM_HUMAN_PLAYER);
+		enableResearch("R-Wpn-Rocket-Damage04", CAM_HUMAN_PLAYER);
 	}
 
-	enableResearch("R-Wpn-Cannon-Damage04", CAM_HUMAN_PLAYER);
-	enableResearch("R-Wpn-Rocket-Damage04", CAM_HUMAN_PLAYER);
 	preDamageStuff();
 }
 
@@ -279,8 +322,19 @@ function setUnitRank(transport)
 		const droid = droids[i];
 		if (droid.droidType !== DROID_CONSTRUCT && droid.droidType !== DROID_REPAIR)
 		{
-			const MOD = (droid.droidType === DROID_COMMAND || droid.droidType === DROID_SENSOR) ? 2 : 1;
-			setDroidExperience(droid, MOD * droidExp[mapRun ? 0 : (transporterIndex - 1)]);
+			let mod = 1;
+			if (droid.droidType === DROID_COMMAND || droid.droidType === DROID_SENSOR)
+			{
+				if (camClassicMode())
+				{
+					mod = 4;
+				}
+				else
+				{
+					mod = 8;
+				}
+			}
+			setDroidExperience(droid, mod * droidExp[mapRun ? 0 : (transporterIndex - 1)]);
 		}
 	}
 }
@@ -349,7 +403,7 @@ function eventStartLevel()
 	const tEnt = getObject("transporterEntry");
 	const tExt = getObject("transporterExit");
 
-	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, "SUB_2_1S");
+	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, cam_levels.beta2.pre);
 	setReinforcementTime(LZ_COMPROMISED_TIME);
 
 	centreView(startPos.x, startPos.y);

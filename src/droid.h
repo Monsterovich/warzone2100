@@ -24,6 +24,7 @@
 #ifndef __INCLUDED_SRC_DROID_H__
 #define __INCLUDED_SRC_DROID_H__
 
+#include "lib/framework/paged_entity_container.h"
 #include "lib/framework/string_ext.h"
 #include "lib/gamelib/gtime.h"
 
@@ -164,8 +165,8 @@ DROID_TYPE droidType(const DROID *psDroid);
 /* Return the type of a droid from it's template */
 DROID_TYPE droidTemplateType(const DROID_TEMPLATE *psTemplate);
 
-void assignDroidsToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGroup);
-void removeDroidsFromGroup(UDWORD playerNumber);
+void assignObjectToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGroup);
+void removeObjectFromGroup(UDWORD playerNumber);
 
 bool activateNoGroup(UDWORD playerNumber, const SELECTIONTYPE selectionType, const SELECTION_CLASS selectionClass, const bool bOnScreen);
 
@@ -184,6 +185,8 @@ unsigned int getDroidLevel(const DROID *psDroid);
 unsigned int getDroidLevel(unsigned int experience, uint8_t player, uint8_t brainComponent);
 UDWORD getDroidEffectiveLevel(const DROID *psDroid);
 const char *getDroidLevelName(const DROID *psDroid);
+// Increase the experience of a droid (and handle events, if needed).
+void droidIncreaseExperience(DROID *psDroid, uint32_t experienceInc);
 
 // Get a droid's name.
 const char *droidGetName(const DROID *psDroid);
@@ -277,7 +280,10 @@ void deleteTemplateFromProduction(DROID_TEMPLATE *psTemplate, unsigned player, Q
 bool isSelectable(DROID const *psDroid);
 
 // Select a droid and do any necessary housekeeping.
-void SelectDroid(DROID *psDroid);
+void SelectDroid(DROID *psDroid, bool programmaticSelection = false);
+
+// If all other droids with psGroupDroid's group are selected, add psGroupDroid to the selection after production/repair/etc.
+void SelectGroupDroid(DROID *psGroupDroid);
 
 // De-select a droid and do any necessary housekeeping.
 void DeSelectDroid(DROID *psDroid);
@@ -403,7 +409,6 @@ void cancelBuild(DROID *psDroid);
 #define syncDebugDroid(psDroid, ch) _syncDebugDroid(__FUNCTION__, psDroid, ch)
 void _syncDebugDroid(const char *function, DROID const *psDroid, char ch);
 
-
 // True iff object is a droid.
 static inline bool isDroid(SIMPLE_OBJECT const *psObject)
 {
@@ -424,5 +429,11 @@ static inline DROID const *castDroid(SIMPLE_OBJECT const *psObject)
  * repairs were made by a mobile repair turret
  */
 void droidWasFullyRepaired(DROID *psDroid, const REPAIR_FACILITY *psRepairFac);
+
+// Split the droid storage into pages containing 256 droids, disable slot reuse
+// to guard against memory-related issues when some object pointers won't get
+// updated properly, e.g. when transitioning between the base and offworld missions.
+using DroidContainer = PagedEntityContainer<DROID, 256, false>;
+DroidContainer& GlobalDroidContainer();
 
 #endif // __INCLUDED_SRC_DROID_H__

@@ -81,6 +81,9 @@
 #include "activity.h"
 #include "lib/framework/wztime.h"
 #include "keybind.h"
+#include "campaigninfo.h"
+#include "wzapi.h"
+#include "screens/guidescreen.h"
 
 #define		IDMISSIONRES_TXT		11004
 #define		IDMISSIONRES_LOAD		11005
@@ -183,9 +186,6 @@ static void emptyTransporters(bool bOffWorld);
 bool MissionResUp	= false;
 
 static SDWORD		g_iReinforceTime = 0;
-
-/* Which campaign are we dealing with? */
-static	UDWORD	camNumber = 1;
 
 
 //returns true if on an off world mission
@@ -1530,7 +1530,10 @@ void missionDroidUpdate(DROID *psDroid)
 	// NO ai update droid
 
 	// update the droids order
-	orderUpdateDroid(psDroid);
+	if (!orderUpdateDroid(psDroid))
+	{
+		ASSERT(false, "orderUpdateDroid returned false?");
+	}
 
 	// update the action of the droid
 	actionUpdateDroid(psDroid);
@@ -1566,6 +1569,14 @@ static void missionResetDroids()
 			if (d->isTransporter())
 			{
 				vanishDroid(d);
+			}
+			else
+			{
+				if (d->pos.x != INVALID_XY && d->pos.y != INVALID_XY)
+				{
+					// update visibility
+					visTilesUpdate(d);
+				}
 			}
 			return IterationResult::CONTINUE_ITERATION;
 		});
@@ -1663,6 +1674,9 @@ static void missionResetDroids()
 				}
 				// Reset the selected flag
 				psDroid->selected = false;
+
+				// update visibility
+				visTilesUpdate(psDroid);
 			}
 			else
 			{
@@ -1801,6 +1815,13 @@ void missionMoveTransporterOffWorld(DROID *psTransporter)
 
 		//stop the droid moving - the moveUpdate happens AFTER the orderUpdate and can cause problems if the droid moves from one tile to another
 		moveReallyStopDroid(psTransporter);
+
+		// clear targets / action targets
+		setDroidTarget(psTransporter, nullptr);
+		for (int i = 0; i < MAX_WEAPONS; i++)
+		{
+			setDroidActionTarget(psTransporter, nullptr, i);
+		}
 
 		//if offworld mission, then add the timer
 		//if (mission.type == LDS_MKEEP || mission.type == LDS_MCLEAR)
@@ -2115,7 +2136,10 @@ void intUpdateTransporterTimer(WIDGET *psWidget, const W_CONTEXT *psContext)
 					if (psTransporter->action == DACTION_TRANSPORTWAITTOFLYIN)
 					{
 						missionFlyTransportersIn(selectedPlayer, false);
-						triggerEvent(TRIGGER_TRANSPORTER_ARRIVED, psTransporter);
+						executeFnAndProcessScriptQueuedRemovals([psTransporter]()
+						{
+							triggerEvent(TRIGGER_TRANSPORTER_ARRIVED, psTransporter);
+						});
 					}
 				}
 			}
@@ -2222,6 +2246,9 @@ static void intDestroyMissionResultWidgets()
 
 static bool _intAddMissionResult(bool result, bool bPlaySuccess, bool showBackDrop)
 {
+	// ensure the guide screen is closed
+	closeGuideScreen();
+
 	missionResetInGameState();
 	scoreUpdateVar(WD_MISSION_ENDED); //Store completion time for this mission
 
@@ -2578,6 +2605,7 @@ bool setUpMission(LEVEL_TYPE type)
 		{
 			return false;
 		}
+		clearCampaignName();
 		loopMissionState = LMS_SAVECONTINUE;
 	}
 	else if (type == LEVEL_TYPE::LDS_MKEEP
@@ -2860,7 +2888,7 @@ void missionTimerUpdate()
 			if ((SDWORD)(gameTime - mission.startTime) > mission.time)
 			{
 				//the script can call the end game cos have failed!
-				triggerEvent(TRIGGER_MISSION_TIMEOUT);
+				executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_MISSION_TIMEOUT); });
 			}
 		}
 	}
@@ -2951,6 +2979,10 @@ void missionDestroyObjects()
 
 	// FIXME: check that orders do not reference anything bad?
 
+	if (!psDestroyedObj.empty())
+	{
+		debug(LOG_INFO, "%zu destroyed objects", psDestroyedObj.size());
+	}
 	gameTime++;	// Wonderful hack to ensure objects destroyed above get free'ed up by objmemUpdate.
 	objmemUpdate();	// Actually free objects removed above
 }
@@ -3119,58 +3151,6 @@ void resetMissionWidgets()
 		addTransporterTimerInterface();
 	}
 
-}
-
-void	setCampaignNumber(UDWORD number)
-{
-	ASSERT(number < 4, "Campaign Number too high!");
-	camNumber = number;
-}
-
-UDWORD	getCampaignNumber()
-{
-	return camNumber;
-}
-
-std::string getCampaignName()
-{
-	UDWORD campaignNum = getCampaignNumber();
-	std::string campaignName;
-	std::vector<CAMPAIGN_FILE> list = readCampaignFiles();
-	if (campaignNum > 0 && campaignNum <= list.size())
-	{
-		campaignName = list[campaignNum - 1].name.toStdString();
-	}
-	return campaignName;
-}
-
-std::vector<CAMPAIGN_FILE> readCampaignFiles()
-{
-	static std::vector<CAMPAIGN_FILE> result;
-	if (!result.empty())
-	{
-		return result;
-	}
-
-	WZ_PHYSFS_enumerateFiles("campaigns", [&](const char *i) -> bool {
-		CAMPAIGN_FILE c;
-		WzString filename("campaigns/");
-		filename += i;
-		if (!filename.endsWith(".json"))
-		{
-			return true; // continue;
-		}
-		WzConfig ini(filename, WzConfig::ReadOnlyAndRequired);
-		c.name = ini.value("name").toWzString();
-		c.level = ini.value("level").toWzString();
-		c.package = ini.value("package").toWzString();
-		c.loading = ini.value("loading").toWzString();
-		c.video = ini.value("video").toWzString();
-		c.captions = ini.value("captions").toWzString();
-		result.push_back(c);
-		return true; // continue
-	});
-	return result;
 }
 
 /*deals with any selectedPlayer's transporters that are flying in when the

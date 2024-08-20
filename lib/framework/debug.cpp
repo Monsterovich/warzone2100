@@ -34,7 +34,16 @@
 #include "wzapp.h"
 #include <map>
 #include <string>
-#include <regex>
+// On Fedora 40, GCC 14 produces false-positive warnings for -Walloc-zero
+// when compiling <regex> with optimizations. Silence these warnings.
+#if !defined(__clang__) && !defined(__INTEL_COMPILER) && defined(__GNUC__) && __GNUC__ >= 14 && defined(__OPTIMIZE__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Walloc-zero"
+#endif
+# include <regex>
+#if !defined(__clang__) && !defined(__INTEL_COMPILER) && defined(__GNUC__) && __GNUC__ >= 14 && defined(__OPTIMIZE__)
+# pragma GCC diagnostic pop
+#endif
 #include <array>
 
 #if defined(WZ_OS_LINUX) && defined(__GLIBC__)
@@ -350,6 +359,14 @@ void debug_init()
 	enabled_debug[LOG_INFO] = true;
 	enabled_debug[LOG_FATAL] = true;
 	enabled_debug[LOG_POPUP] = true;
+#if defined(__EMSCRIPTEN__)
+	// start with certain options off so that we can control them predictably from the command-line options via the web interface
+	enabled_debug[LOG_INFO] = false;
+	enabled_debug[LOG_WARNING] = false;
+	enabled_debug[LOG_3D] = false;
+	// must be false or sound breaks (some openal edge case)
+	enabled_debug[LOG_SOUND] = false;
+#endif
 #ifdef DEBUG
 	enabled_debug[LOG_WARNING] = true;
 #endif
@@ -759,7 +776,7 @@ void _debugBacktrace(code_part part)
 			}
 		}
 	};
-	for (i = 1; i + 2 < num; ++i) 
+	for (i = 1; i + 2 < num; ++i)
 	{
 		int status = -1;
 		char buf[1024];
@@ -803,3 +820,38 @@ void _debug_multiline(int line, code_part part, const char *function, const std:
 	}
 }
 
+#if defined(__EMSCRIPTEN__)
+
+#include <emscripten.h>
+
+/**
+ * Callback for outputting to a emscripten log / console
+ *
+ * \param	data			Ignored. Use NULL.
+ * \param	outputBuffer	Buffer containing the preprocessed text to output.
+ */
+void debug_callback_emscripten_log(WZ_DECL_UNUSED void **data, const char *outputBuffer, code_part part)
+{
+	int flags = EM_LOG_NO_PATHS | EM_LOG_CONSOLE;
+	switch (part)
+	{
+		case LOG_ERROR:
+			flags |= EM_LOG_ERROR;
+			break;
+		case LOG_WARNING:
+			flags |= EM_LOG_WARN;
+			break;
+		default:
+			break;
+	}
+	if (outputBuffer[strlen(outputBuffer) - 1] != '\n')
+	{
+		emscripten_log(flags, "%s\n", outputBuffer);
+	}
+	else
+	{
+		emscripten_log(flags, "%s", outputBuffer);
+	}
+}
+
+#endif

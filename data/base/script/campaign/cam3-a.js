@@ -58,7 +58,7 @@ camAreaEvent ("middleTrigger", function(droid)
 
 function setUnitRank(transport)
 {
-	const droidExp = [1024, 256, 128, 64]; //Can make Hero Commanders if recycled.
+	const droidExp = [2048, 256, 128, 64]; //Can make Hero Commanders if recycled.
 	const droids = enumCargo(transport);
 
 	for (let i = 0, len = droids.length; i < len; ++i)
@@ -202,15 +202,28 @@ function wave3()
 //Setup Nexus VTOL hit and runners.
 function vtolAttack()
 {
-	const list = [cTempl.nxmtherv, cTempl.nxmtherv];
-	const ext = {
-		limit: [2, 2], //paired with list array
-		alternate: true,
-		altIdx: 0
-	};
-	camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(5)), "NXCommandCenter", ext);
-	queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
-	queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	if (camClassicMode())
+	{
+		const list = [cTempl.nxlscouv, cTempl.nxmtherv, cTempl.nxlneedv, cTempl.nxlscouv];
+		const ext = {
+			limit: [2, 4, 2, 2], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(5)), "NXCommandCenter", ext);
+	}
+	else
+	{
+		const list = [cTempl.nxmtherv, cTempl.nxmtherv];
+		const ext = {
+			limit: [2, 2], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(5)), "NXCommandCenter", ext);
+		queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
+		queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	}
 }
 
 //These groups are active immediately.
@@ -263,30 +276,72 @@ function cam3Setup()
 		"R-Wpn-Energy-Damage02", "R-Wpn-Energy-ROF01", "R-Wpn-Energy-Accuracy01",
 		"R-Sys-NEXUSsensor",
 	];
+	const nexusResClassic = [
+		"R-Defense-WallUpgrade07", "R-Struc-Materials07", "R-Struc-Factory-Upgrade06",
+		"R-Struc-VTOLPad-Upgrade06", "R-Vehicle-Engine09", "R-Vehicle-Metals07",
+		"R-Cyborg-Metals07", "R-Vehicle-Armor-Heat03", "R-Cyborg-Armor-Heat03",
+		"R-Sys-Engineering03", "R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02",
+		"R-Wpn-Bomb-Damage03", "R-Wpn-Missile-Damage01", "R-Wpn-Missile-ROF01",
+		"R-Sys-Sensor-Upgrade01", "R-Sys-NEXUSrepair", "R-Wpn-Rail-Damage01",
+		"R-Wpn-Rail-ROF01", "R-Wpn-Flamer-Damage06", "R-Sys-NEXUSsensor",
+	];
 
 	for (let x = 0, l = mis_structsAlpha.length; x < l; ++x)
 	{
 		enableStructure(mis_structsAlpha[x], CAM_HUMAN_PLAYER);
 	}
 
-	camCompleteRequiredResearch(mis_gammaAllyRes, CAM_HUMAN_PLAYER);
-	camCompleteRequiredResearch(mis_gammaAllyRes, CAM_NEXUS);
-	camCompleteRequiredResearch(nexusRes, CAM_NEXUS);
-
-	if (difficulty >= HARD)
+	if (camClassicMode())
 	{
-		improveNexusAlloys();
-	}
+		camCompleteRequiredResearch(mis_alphaResearchNewClassic, CAM_HUMAN_PLAYER);
+		camCompleteRequiredResearch(mis_betaResearchNewClassic, CAM_HUMAN_PLAYER);
+		camCompleteRequiredResearch(mis_playerResBetaClassic, CAM_HUMAN_PLAYER);
+		camCompleteRequiredResearch(mis_playerResGammaClassic, CAM_HUMAN_PLAYER);
 
-	enableResearch("R-Wpn-Howitzer03-Rot", CAM_HUMAN_PLAYER);
-	enableResearch("R-Wpn-MG-Damage09", CAM_HUMAN_PLAYER);
-	enableResearch("R-Wpn-Flamer-ROF04", CAM_HUMAN_PLAYER);
-	enableResearch("R-Defense-WallUpgrade07", CAM_HUMAN_PLAYER);
+		if (tweakOptions.camClassic_balance32)
+		{
+			camClassicResearch(mis_gammaStartingResearchClassic, CAM_HUMAN_PLAYER);
+			completeResearch("CAM2RESEARCH-UNDO", CAM_HUMAN_PLAYER);
+			completeResearch("CAM3RESEARCH-UNDO", CAM_HUMAN_PLAYER);
+			//Nexus only has auto-repair and the NavGunSensor for 3.2
+			camClassicResearch(cam_nexusSpecialResearch, CAM_NEXUS);
+		}
+		else
+		{
+			camCompleteRequiredResearch(mis_gammaStartingResearchClassic, CAM_HUMAN_PLAYER);
+			camCompleteRequiredResearch(mis_alphaResearchNewClassic, CAM_NEXUS);
+			camCompleteRequiredResearch(mis_betaResearchNewClassic, CAM_NEXUS);
+			camCompleteRequiredResearch(nexusResClassic, CAM_NEXUS);
+		}
+
+		enableResearch("R-Wpn-Howitzer03-Rot", CAM_HUMAN_PLAYER);
+		enableResearch("R-Wpn-MG-Damage08", CAM_HUMAN_PLAYER);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_gammaAllyRes, CAM_HUMAN_PLAYER);
+		camCompleteRequiredResearch(mis_gammaAllyRes, CAM_NEXUS);
+		camCompleteRequiredResearch(nexusRes, CAM_NEXUS);
+
+		if (difficulty >= HARD)
+		{
+			improveNexusAlloys();
+		}
+
+		enableResearch("R-Wpn-Howitzer03-Rot", CAM_HUMAN_PLAYER);
+		enableResearch("R-Wpn-MG-Damage09", CAM_HUMAN_PLAYER);
+		enableResearch("R-Wpn-Flamer-ROF04", CAM_HUMAN_PLAYER);
+		enableResearch("R-Defense-WallUpgrade07", CAM_HUMAN_PLAYER);
+	}
 }
 
 //Normal and lower difficulties has Nexus start off a little bit weaker
 function improveNexusAlloys()
 {
+	if (camClassicMode())
+	{
+		return;
+	}
 	const alloys = [
 		"R-Vehicle-Metals07", "R-Cyborg-Metals07",
 		"R-Vehicle-Armor-Heat04", "R-Cyborg-Armor-Heat04"
@@ -302,7 +357,7 @@ function eventStartLevel()
 	const tEnt = getObject("transporterEntry");
 	const tExt = getObject("transporterExit");
 
-	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, "SUB_3_1S");
+	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, cam_levels.gamma2.pre);
 	setMissionTime(camChangeOnDiff(camHoursToSeconds(2)));
 
 	centreView(startPos.x, startPos.y);

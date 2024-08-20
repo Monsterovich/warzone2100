@@ -183,22 +183,6 @@ void clearMissionWidgets();
 /** Resets if return to game after an ESC. */
 void resetMissionWidgets();
 
-UDWORD	getCampaignNumber();
-void	setCampaignNumber(UDWORD number);
-
-std::string getCampaignName();
-
-struct CAMPAIGN_FILE
-{
-	WzString name;
-	WzString level;
-	WzString video;
-	WzString captions;
-	WzString package;
-	WzString loading;
-};
-std::vector<CAMPAIGN_FILE> readCampaignFiles();
-
 bool intAddMissionResult(bool result, bool bPlaySuccess, bool showBackDrop);
 
 

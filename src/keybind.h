@@ -24,7 +24,9 @@
 #include "console.h"
 #include "selection.h"
 #include "orderdef.h"
+#include "difficulty.h"
 #include "lib/framework/fixedpoint.h"
+#include "input/keyconfig.h"
 
 #define	MAP_ZOOM_RATE_MAX	(1000)
 #define	MAP_ZOOM_RATE_MIN	(200)
@@ -138,8 +140,7 @@ void kf_ToggleConsoleDrop();
 void kf_ToggleShakeStatus();
 void kf_ToggleMouseInvert();
 void kf_BifferBaker();
-void kf_SetEasyLevel();
-void kf_SetNormalLevel();
+void kf_SetDifficultyLevel(const DIFFICULTY_LEVEL level);
 void kf_DoubleUp();
 void kf_UpThePower();
 void kf_MaxPower();
@@ -147,7 +148,6 @@ void kf_KillEnemy();
 void kf_ToggleMissionTimer();
 void kf_TraceObject();
 
-void kf_SetHardLevel();
 MappableFunction kf_SelectCommander_N(const unsigned int n);
 
 void kf_ToggleShowGateways();

@@ -1,13 +1,28 @@
 cmake_minimum_required (VERSION 3.5...3.24)
 
-SET(UTF8PROC_INSTALL OFF CACHE BOOL "Enable installation of utf8proc" FORCE)
-add_subdirectory(utf8proc)
-set_property(TARGET utf8proc PROPERTY FOLDER "3rdparty")
+include(CheckCompilerFlagsOutput)
 
-add_subdirectory(launchinfo)
+SET(UTF8PROC_INSTALL OFF CACHE BOOL "Enable installation of utf8proc" FORCE)
+add_subdirectory(utf8proc EXCLUDE_FROM_ALL)
+set_property(TARGET utf8proc PROPERTY FOLDER "3rdparty")
+if(NOT MSVC)
+	set(_supported_utf8proc_cxx_compiler_flags "")
+
+	# -Wassign-enum
+	check_compiler_flags_output("-Werror -Wno-assign-enum -Wno-error=cpp" COMPILER_TYPE CXX   OUTPUT_FLAGS "-Wno-assign-enum" OUTPUT_VARIABLE _supported_utf8proc_cxx_compiler_flags APPEND)
+
+	if (NOT _supported_utf8proc_cxx_compiler_flags STREQUAL "")
+		string(REPLACE " " ";" _supported_utf8proc_cxx_compiler_flags "${_supported_utf8proc_cxx_compiler_flags}")
+		target_compile_options(utf8proc PRIVATE ${_supported_utf8proc_cxx_compiler_flags})
+	endif()
+endif()
+
+add_subdirectory(launchinfo EXCLUDE_FROM_ALL)
 set_property(TARGET launchinfo PROPERTY FOLDER "3rdparty")
 
-add_subdirectory(fmt)
+SET(FMT_INSTALL OFF CACHE BOOL "Generate the install target" FORCE)
+SET(FMT_SYSTEM_HEADERS ON CACHE BOOL "Expose headers with marking them as system." FORCE)
+add_subdirectory(fmt EXCLUDE_FROM_ALL)
 set_property(TARGET fmt PROPERTY FOLDER "3rdparty")
 
 # inih library
@@ -32,9 +47,10 @@ target_include_directories(re2 PUBLIC
 )
 set_property(TARGET re2 PROPERTY FOLDER "3rdparty")
 set_property(TARGET re2 PROPERTY XCODE_ATTRIBUTE_GCC_WARN_ABOUT_MISSING_FIELD_INITIALIZERS NO)	# -Wmissing-field-initializers
-set_property(TARGET re2 PROPERTY XCODE_ATTRIBUTE_WARNING_CFLAGS "-Wno-missing-field-initializers")
+set_property(TARGET re2 PROPERTY XCODE_ATTRIBUTE_GCC_WARN_SHADOW NO)	# -Wshadow
+set_property(TARGET re2 PROPERTY XCODE_ATTRIBUTE_WARNING_CFLAGS "-Wno-missing-field-initializers -Wno-shadow")
 
-add_subdirectory(EmbeddedJSONSignature)
+add_subdirectory(EmbeddedJSONSignature EXCLUDE_FROM_ALL)
 set_property(TARGET EmbeddedJSONSignature PROPERTY FOLDER "3rdparty")
 
 if(ENABLE_DISCORD)
@@ -54,6 +70,9 @@ set(SQLITECPP_RUN_CPPLINT OFF CACHE BOOL "Run cpplint.py tool for Google C++ Sty
 set(SQLITECPP_RUN_CPPCHECK OFF CACHE BOOL "Run cppcheck C++ static analysis tool." FORCE)
 set(SQLITECPP_BUILD_EXAMPLES OFF CACHE BOOL "Build examples." FORCE)
 set(SQLITECPP_BUILD_TESTS OFF CACHE BOOL "Build and run tests." FORCE)
+if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+	set(SQLITECPP_USE_STACK_PROTECTION OFF CACHE BOOL "USE Stack Protection hardening." FORCE)
+endif()
 add_subdirectory(SQLiteCpp EXCLUDE_FROM_ALL)
 set_property(TARGET SQLiteCpp PROPERTY FOLDER "3rdparty")
 
@@ -141,6 +160,18 @@ if (WZ_ENABLE_BASIS_UNIVERSAL AND NOT WZ_CI_DISABLE_BASIS_COMPRESS_TEXTURES)
 	  message(STATUS "Pre-installed basisu tool found: ${BASIS_UNIVERSAL_CLI}")
 	endif()
 
+	# Test basisu -version
+	execute_process(
+		COMMAND "${BASIS_UNIVERSAL_CLI}" -version
+		OUTPUT_VARIABLE BASISU_VERSION
+		OUTPUT_STRIP_TRAILING_WHITESPACE
+		RESULT_VARIABLE _basisu_result
+	)
+	if(_basisu_result AND NOT _basisu_result EQUAL 0)
+		message(FATAL_ERROR "basisu does not seem to be executable on this host?: ${BASIS_UNIVERSAL_CLI} (exit code: ${_basisu_result})")
+	endif()
+	message(STATUS "Found basisu: ${BASIS_UNIVERSAL_CLI} ${BASISU_VERSION}")
+
 	set(BASIS_UNIVERSAL_CLI "${BASIS_UNIVERSAL_CLI}" PARENT_SCOPE)
 
 endif()
@@ -153,12 +184,26 @@ if (WZ_ENABLE_BASIS_UNIVERSAL)
 	set_property(TARGET basis_transcoder PROPERTY FOLDER "3rdparty")
 	target_include_directories(basis_transcoder PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/basis_universal/transcoder")
 
-	include(CheckCompilerFlagsOutput)
 	if(NOT MSVC)
 		set(_supported_basistranscoder_cxx_compiler_flags "")
 
 		# -fno-strict-aliasing		(GCC, Clang)
 		check_compiler_flags_output("-Werror -fno-strict-aliasing -Wno-error=cpp" COMPILER_TYPE CXX   OUTPUT_FLAGS "-fno-strict-aliasing" OUTPUT_VARIABLE _supported_basistranscoder_cxx_compiler_flags APPEND)
+
+		# -Wcast-align				(GCC 3.4+, Clang 3.2+)
+		check_compiler_flags_output("-Werror -Wno-cast-align -Wno-error=cpp" COMPILER_TYPE CXX   OUTPUT_FLAGS "-Wno-cast-align" OUTPUT_VARIABLE _supported_basistranscoder_cxx_compiler_flags APPEND)
+
+		# -Wdeprecated-declarations
+		check_compiler_flags_output("-Werror -Wno-deprecated-declarations -Wno-error=cpp" COMPILER_TYPE CXX   OUTPUT_FLAGS "-Wno-deprecated-declarations" OUTPUT_VARIABLE _supported_basistranscoder_cxx_compiler_flags APPEND)
+
+		# -Wunused-but-set-variable
+		check_compiler_flags_output("-Werror -Wno-unused-but-set-variable -Wno-error=cpp" COMPILER_TYPE CXX   OUTPUT_FLAGS "-Wno-unused-but-set-variable" OUTPUT_VARIABLE _supported_basistranscoder_cxx_compiler_flags APPEND)
+
+		# -Wunused-function
+		check_compiler_flags_output("-Werror -Wno-unused-function -Wno-error=cpp" COMPILER_TYPE CXX   OUTPUT_FLAGS "-Wno-unused-function" OUTPUT_VARIABLE _supported_basistranscoder_cxx_compiler_flags APPEND)
+
+		# -Wunused-const-variable
+		check_compiler_flags_output("-Werror -Wno-unused-const-variable -Wno-error=cpp" COMPILER_TYPE CXX   OUTPUT_FLAGS "-Wno-unused-const-variable" OUTPUT_VARIABLE _supported_basistranscoder_cxx_compiler_flags APPEND)
 
 		if (NOT _supported_basistranscoder_cxx_compiler_flags STREQUAL "")
 			string(REPLACE " " ";" _supported_basistranscoder_cxx_compiler_flags "${_supported_basistranscoder_cxx_compiler_flags}")
@@ -217,3 +262,18 @@ if (WZ_PROFILING_NVTX)
 	set(PROFILING_NVTX_INCLUDE ${CUDAToolkit_INCLUDE_DIRS} PARENT_SCOPE)
 
 endif ()
+
+add_subdirectory(libplum EXCLUDE_FROM_ALL)
+set_target_properties(plum plum-static PROPERTIES FOLDER "3rdparty")
+if(NOT MSVC)
+	set(_supported_libplum_c_compiler_flags "")
+
+	# -Wshadow
+	check_compiler_flags_output("-Werror -Wno-shadow -Wno-error=cpp" COMPILER_TYPE C   OUTPUT_FLAGS "-Wno-shadow" OUTPUT_VARIABLE _supported_libplum_c_compiler_flags APPEND)
+
+	if (NOT _supported_libplum_c_compiler_flags STREQUAL "")
+		string(REPLACE " " ";" _supported_libplum_c_compiler_flags "${_supported_libplum_c_compiler_flags}")
+		target_compile_options(plum PRIVATE ${_supported_libplum_c_compiler_flags})
+		target_compile_options(plum-static PRIVATE ${_supported_libplum_c_compiler_flags})
+	endif()
+endif()

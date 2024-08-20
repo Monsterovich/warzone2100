@@ -17,6 +17,16 @@ const mis_nexusRes = [
 	"R-Wpn-Energy-Damage03", "R-Wpn-Energy-ROF03", "R-Wpn-Energy-Accuracy01",
 	"R-Wpn-AAGun-Accuracy03", "R-Wpn-Howitzer-Accuracy03", "R-Sys-NEXUSsensor",
 ];
+const mis_nexusResClassic = [
+	"R-Defense-WallUpgrade08", "R-Struc-Materials08", "R-Struc-Factory-Upgrade06",
+	"R-Struc-VTOLPad-Upgrade06", "R-Vehicle-Engine09", "R-Vehicle-Metals07",
+	"R-Cyborg-Metals07", "R-Vehicle-Armor-Heat05", "R-Cyborg-Armor-Heat05",
+	"R-Sys-Engineering03", "R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02",
+	"R-Wpn-Bomb-Damage03", "R-Wpn-Energy-Accuracy01", "R-Wpn-Energy-Damage02",
+	"R-Wpn-Energy-ROF02", "R-Wpn-Missile-Accuracy01", "R-Wpn-Missile-Damage01",
+	"R-Wpn-Rail-Damage02", "R-Wpn-Rail-ROF02", "R-Sys-Sensor-Upgrade01",
+	"R-Sys-NEXUSrepair", "R-Wpn-Flamer-Damage06", "R-Sys-NEXUSsensor",
+];
 var alphaUnitIDs;
 var startExtraLoss;
 
@@ -66,7 +76,7 @@ camAreaEvent("phantomFacTrigger", function(droid)
 
 function setAlphaExp()
 {
-	const DROID_EXP = 512; //Hero rank.
+	const DROID_EXP = 2048; //Hero rank.
 	const alphaDroids = enumArea("alphaPit", MIS_ALPHA_PLAYER, false).filter((obj) => (
 		obj.type === DROID
 	));
@@ -86,7 +96,7 @@ function getAlphaUnitIDs()
 {
 	alphaUnitIDs = [];
 	const alphaDroids = enumArea("alphaPit", CAM_HUMAN_PLAYER, false).filter((obj) => (
-		obj.type === DROID && obj.experience === 512
+		obj.type === DROID && obj.experience > 0
 	));
 
 	for (let i = 0, l = alphaDroids.length; i < l; ++i)
@@ -222,22 +232,35 @@ function wave3()
 //Setup Nexus VTOL hit and runners.
 function vtolAttack()
 {
-	const list = [cTempl.nxmtherv, cTempl.nxmtherv];
-	const ext = {
-		limit: [3, 3], //paired with list array
-		alternate: true,
-		altIdx: 0
-	};
-	camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(2)), "NXvtolStrikeTower", ext);
-	queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
-	queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	if (camClassicMode())
+	{
+		const list = [cTempl.nxlscouv, cTempl.nxlscouv, cTempl.nxmtherv];
+		const ext = {
+			limit: [2, 2, 4], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(2)), "NXvtolStrikeTower", ext);
+	}
+	else
+	{
+		const list = [cTempl.nxmtherv, cTempl.nxmtherv];
+		const ext = {
+			limit: [3, 3], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(2)), "NXvtolStrikeTower", ext);
+		queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
+		queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	}
 }
 
 //Reinforcements not available until team Alpha brief about VTOLS.
 function enableReinforcements()
 {
 	playSound(cam_sounds.reinforcementsAreAvailable);
-	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, "CAM3A-B", {
+	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, cam_levels.gamma5, {
 		area: "RTLZ",
 		message: "C32_LZ",
 		reinforcements: camMinutesToSeconds(3),
@@ -289,7 +312,7 @@ function eventStartLevel()
 	const tExt = getObject("transporterExit");
 	startExtraLoss = false;
 
-	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, "CAM3A-B", {
+	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, cam_levels.gamma5, {
 		area: "RTLZ",
 		message: "C32_LZ",
 		reinforcements: -1,
@@ -297,17 +320,26 @@ function eventStartLevel()
 		retlz: true
 	});
 
-	camSetArtifacts({
-		"NXartiCyborg": { tech: "R-Wpn-Cannon-ROF05" },
-	});
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_nexusResClassic, CAM_NEXUS);
+		camClassicResearch(mis_gammaAllyResClassic, MIS_ALPHA_PLAYER);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
+		camCompleteRequiredResearch(mis_gammaAllyRes, MIS_ALPHA_PLAYER);
+
+		camSetArtifacts({
+			"NXartiCyborg": { tech: "R-Wpn-Cannon-ROF05" },
+		});
+	}
 
 	centreView(startPos.x, startPos.y);
 	setNoGoArea(lz.x, lz.y, lz.x2, lz.y2, CAM_HUMAN_PLAYER);
 	startTransporterEntry(tEnt.x, tEnt.y, CAM_HUMAN_PLAYER);
 	setTransporterExit(tExt.x, tExt.y, CAM_HUMAN_PLAYER);
 
-	camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
-	camCompleteRequiredResearch(mis_gammaAllyRes, MIS_ALPHA_PLAYER);
 	setAlliance(MIS_ALPHA_PLAYER, CAM_NEXUS, true);
 	setAlliance(MIS_ALPHA_PLAYER, CAM_HUMAN_PLAYER, true);
 	changePlayerColour(MIS_ALPHA_PLAYER, 0);

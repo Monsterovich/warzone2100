@@ -49,8 +49,10 @@
 #include "qtscript.h"		// for bInTutorial
 #include "radar.h"
 #include "seqdisp.h"
+#include "campaigninfo.h"
 #include "hci/groups.h"
 #include "screens/netpregamescreen.h"
+#include "screens/guidescreen.h"
 
 bool hostQuitConfirmation = true;
 
@@ -236,6 +238,13 @@ static bool _intAddInGameOptions()
 	addIGTextButton(INTINGAMEOP_RESUME, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Resume Game"), OPALIGN);
 	row++;
 
+	if (hasGameGuideTopics())
+	{
+		// add "View Guide"
+		addIGTextButton(INTINGAMEOP_OPENGAMEGUIDE, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("View Guide"), OPALIGN);
+		row++;
+	}
+
 	// add 'options'
 	addIGTextButton(INTINGAMEOP_OPTIONS, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Options"), OPALIGN);
 	row++;
@@ -256,9 +265,12 @@ static bool _intAddInGameOptions()
 			// add 'load'
 			addIGTextButton(INTINGAMEOP_LOAD_MISSION, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Load Game"), OPALIGN);
 			row++;
-			// add 'save'
-			addIGTextButton(INTINGAMEOP_SAVE_MISSION, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Save Game"), OPALIGN);
-			row++;
+			if (!getCamTweakOption_AutosavesOnly())
+			{
+				// add 'save'
+				addIGTextButton(INTINGAMEOP_SAVE_MISSION, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Save Game"), OPALIGN);
+				row++;
+			}
 		}
 	}
 
@@ -990,6 +1002,11 @@ void intProcessInGameOptions(UDWORD id)
 	case INTINGAMEOP_POPUP_QUIT:
 	case INTINGAMEOP_QUIT:		//quit was confirmed.
 		intCloseInGameOptions(false, false);
+		break;
+
+	case INTINGAMEOP_OPENGAMEGUIDE:
+		intCloseInGameOptions(false, false);
+		showGuideScreen([]() { /* no=op on close func */ }, true);
 		break;
 
 	case INTINGAMEOP_OPTIONS:			//game options  was pressed

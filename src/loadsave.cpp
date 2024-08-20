@@ -59,6 +59,7 @@
 #include "clparse.h"
 #include "ingameop.h"
 #include "game.h"
+#include "campaigninfo.h"
 #include "version.h"
 #define totalslots 36			// saves slots
 #define slotsInColumn 12		// # of slots in a column
@@ -282,6 +283,19 @@ bool addLoadSave(LOADSAVE_MODE savemode, const char *title)
 	sFormInit.UserData = bLoad;
 	widgAddForm(psRequestScreen, &sFormInit);
 
+	// Add Banner Label
+	W_LABINIT sLabInit;
+	sLabInit.formID = LOADSAVE_BANNER;
+	sLabInit.FontID = font_large;
+	sLabInit.id		= LOADSAVE_LABEL;
+	sLabInit.style	= WLAB_ALIGNCENTRE;
+	sLabInit.x		= 0;
+	sLabInit.y		= 0;
+	sLabInit.width	= LOADSAVE_W - (2 * LOADSAVE_HGAP);	//LOADSAVE_W;
+	sLabInit.height = LOADSAVE_BANNER_DEPTH;		//This looks right -Q
+	sLabInit.pText	= WzString::fromUtf8(title);
+	widgAddLabel(psRequestScreen, &sLabInit);
+
 	// add cancel.
 	W_BUTINIT sButInit;
 	sButInit.formID = LOADSAVE_BANNER;
@@ -296,19 +310,6 @@ bool addLoadSave(LOADSAVE_MODE savemode, const char *title)
 	sButInit.pTip = _("Close");
 	sButInit.pDisplay = intDisplayImageHilight;
 	widgAddButton(psRequestScreen, &sButInit);
-
-	// Add Banner Label
-	W_LABINIT sLabInit;
-	sLabInit.formID = LOADSAVE_BANNER;
-	sLabInit.FontID = font_large;
-	sLabInit.id		= LOADSAVE_LABEL;
-	sLabInit.style	= WLAB_ALIGNCENTRE;
-	sLabInit.x		= 0;
-	sLabInit.y		= 0;
-	sLabInit.width	= LOADSAVE_W - (2 * LOADSAVE_HGAP);	//LOADSAVE_W;
-	sLabInit.height = LOADSAVE_BANNER_DEPTH;		//This looks right -Q
-	sLabInit.pText	= WzString::fromUtf8(title);
-	widgAddLabel(psRequestScreen, &sLabInit);
 
 	// add slots
 	sButInit = W_BUTINIT();
@@ -802,10 +803,6 @@ static void runLoadCleanup()
 		return;
 	}
 
-	// Load a savegame.
-	unsigned campaign = getCampaign(sRequestResult);
-	setCampaignNumber(campaign);
-	debug(LOG_WZ, "Set campaign for %s to %u", sRequestResult, campaign);
 	closeLoadSave();
 }
 
@@ -1132,7 +1129,7 @@ static void freeAutoSaveSlot(SAVEGAME_LOC loc)
 	deleteSaveGame_classic(savefile);
 }
 
-bool autoSave()
+bool autoSave(bool force)
 {
 	// Bail out if we're running a _true_ multiplayer game or are playing a tutorial/debug/cheating/autogames
 	const DebugInputManager& dbgInputManager = gInputManager.debugManager();
@@ -1142,6 +1139,11 @@ bool autoSave()
 	}
 	// Bail out if we're running a replay
 	if (NETisReplay())
+	{
+		return false;
+	}
+	// Bail out if autosaves only mode and not forced
+	if (getCamTweakOption_AutosavesOnly() && !force)
 	{
 		return false;
 	}
@@ -1161,7 +1163,7 @@ bool autoSave()
 	std::string suggestedName = suggestSaveName(dir).toStdString();
 	char savefile[PATH_MAX];
 	snprintf(savefile, sizeof(savefile), "%s/%s_%s.gam", dir, suggestedName.c_str(), savedate);
-	if (saveGame(savefile, GTYPE_SAVE_MIDMISSION))
+	if (saveGame(savefile, GTYPE_SAVE_MIDMISSION, true))
 	{
 		console(_("AutoSave %s"), savegameWithoutExtension(savefile));
 		return true;

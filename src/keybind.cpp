@@ -76,7 +76,9 @@
 #include "loadsave.h"
 #include "game.h"
 #include "droid.h"
+#include "move.h"
 #include "spectatorwidgets.h"
+#include "campaigninfo.h"
 
 #include "activity.h"
 
@@ -305,9 +307,9 @@ void	kf_HalveHeights()
 {
 	MAPTILE	*psTile;
 
-	for (int i = 0; i < mapWidth; ++i)
+	for (int j = 0; j < mapHeight; ++j)
 	{
-		for (int j = 0; j < mapHeight; ++j)
+		for (int i = 0; i < mapWidth; ++i)
 		{
 			psTile = mapTile(i, j);
 			psTile->height /= 2;
@@ -386,49 +388,61 @@ void kf_CloneSelected(int limit)
 		return; // no-op
 	}
 
-	mutating_list_iterate(apsDroidLists[selectedPlayer], [limit, &sTemplate](DROID* d)
+	bool selectedAnything = false;
+	const DROID* droidToClone = nullptr;
+	for (const DROID* d : apsDroidLists[selectedPlayer])
 	{
-		if (d->selected)
+		if (!d->selected)
 		{
-			enumerateTemplates(selectedPlayer, [psDroid = d, &sTemplate](DROID_TEMPLATE* psTempl) {
-				if (psTempl->name.compare(psDroid->aName) == 0)
-				{
-					sTemplate = psTempl;
-					return false; // stop enumerating
-				}
-				return true;
-			});
-
-			if (!sTemplate)
-			{
-				debug(LOG_ERROR, "Cloning vat has been destroyed. We can't find the template for this droid: %s, id:%u, type:%d!", d->aName, d->id, d->droidType);
-				return IterationResult::BREAK_ITERATION;
-			}
-
-			// create a new droid army
-			for (int i = 0; i < limit; i++)
-			{
-				Vector2i pos = d->pos.xy() + iSinCosR(40503 * i, iSqrt(50 * 50 * (i + 1)));  // 40503 = 65536/φ (A bit more than a right angle)
-				DROID* psNewDroid = buildDroid(sTemplate, pos.x, pos.y, d->player, false, nullptr);
-				if (psNewDroid)
-				{
-					addDroid(psNewDroid, apsDroidLists);
-					triggerEventDroidBuilt(psNewDroid, nullptr);
-				}
-				else if (!bMultiMessages)
-				{
-					debug(LOG_ERROR, "Cloning has failed for template:%s id:%d", getID(sTemplate), sTemplate->multiPlayerID);
-				}
-			}
-			std::string msg = astringf(_("Player %u is cheating a new droid army of: %d × %s."), selectedPlayer, limit, d->aName);
-			sendInGameSystemMessage(msg.c_str());
-			Cheated = true;
-			audio_PlayTrack(ID_SOUND_NEXUS_LAUGH1);
-			return IterationResult::BREAK_ITERATION;
+			continue;
 		}
+		selectedAnything = true;
+		enumerateTemplates(selectedPlayer, [psDroid = d, &sTemplate](DROID_TEMPLATE* psTempl) {
+			if (psTempl->name.compare(psDroid->aName) == 0)
+			{
+				sTemplate = psTempl;
+				return false; // stop enumerating
+			}
+			return true;
+		});
+		if (!sTemplate)
+		{
+			debug(LOG_ERROR, "Cloning vat has been destroyed. We can't find the template for this droid: %s, id:%u, type:%d!", d->aName, d->id, d->droidType);
+			break;
+		}
+		droidToClone = d;
+		// Break out of the loop if we've successfully found the associated droid template.
+		break;
+	}
+	if (!selectedAnything)
+	{
 		debug(LOG_INFO, "Nothing was selected?");
-		return IterationResult::CONTINUE_ITERATION;
-	});
+		return;
+	}
+	if (!sTemplate)
+	{
+		return;
+	}
+	ASSERT(droidToClone != nullptr, "No droid to clone found");
+	// create a new droid army
+	for (int i = 0; i < limit; i++)
+	{
+		Vector2i pos = droidToClone->pos.xy() + iSinCosR(40503 * i, iSqrt(50 * 50 * (i + 1)));  // 40503 = 65536/φ (A bit more than a right angle)
+		DROID* psNewDroid = buildDroid(sTemplate, pos.x, pos.y, droidToClone->player, false, nullptr);
+		if (psNewDroid)
+		{
+			addDroid(psNewDroid, apsDroidLists);
+			triggerEventDroidBuilt(psNewDroid, nullptr);
+		}
+		else if (!bMultiMessages)
+		{
+			debug(LOG_ERROR, "Cloning has failed for template:%s id:%d", getID(sTemplate), sTemplate->multiPlayerID);
+		}
+	}
+	std::string msg = astringf(_("Player %u is cheating a new droid army of: %d × %s."), selectedPlayer, limit, droidToClone->aName);
+	sendInGameSystemMessage(msg.c_str());
+	Cheated = true;
+	audio_PlayTrack(ID_SOUND_NEXUS_LAUGH1);
 }
 
 void kf_MakeMeHero()
@@ -448,10 +462,10 @@ void kf_MakeMeHero()
 
 	for (DROID *psDroid : apsDroidLists[selectedPlayer])
 	{
-		if (psDroid->selected && psDroid->droidType == DROID_COMMAND)
+		if (psDroid->selected && (psDroid->droidType == DROID_COMMAND || psDroid->droidType == DROID_SENSOR))
 		{
-			psDroid->experience = 8 * 65536 * 128;
-		} 
+			psDroid->experience = 16 * 65536 * 128;
+		}
 		else if (psDroid->selected)
 		{
 			psDroid->experience = 4 * 65536 * 128;
@@ -560,19 +574,6 @@ void	kf_BifferBaker()
 	          selectedPlayer, _("Hard as nails!!!"));
 	sendInGameSystemMessage(cmsg.c_str());
 }
-// --------------------------------------------------------------------------
-void	kf_SetEasyLevel()
-{
-	// Bail out if we're running a _true_ multiplayer game (to prevent MP cheating)
-	if (runningMultiplayer())
-	{
-		noMPCheatMsg();
-		return;
-	}
-
-	setDifficultyLevel(DL_EASY);
-	addConsoleMessage(_("Takings thing easy!"), LEFT_JUSTIFY, SYSTEM_MESSAGE);
-}
 
 // --------------------------------------------------------------------------
 void	kf_UpThePower()
@@ -605,7 +606,7 @@ void	kf_MaxPower()
 }
 
 // --------------------------------------------------------------------------
-void	kf_SetNormalLevel()
+void kf_SetDifficultyLevel(const DIFFICULTY_LEVEL level)
 {
 	// Bail out if we're running a _true_ multiplayer game (to prevent MP cheating)
 	if (runningMultiplayer())
@@ -614,21 +615,16 @@ void	kf_SetNormalLevel()
 		return;
 	}
 
-	setDifficultyLevel(DL_NORMAL);
-	addConsoleMessage(_("Back to normality!"), LEFT_JUSTIFY, SYSTEM_MESSAGE);
-}
-// --------------------------------------------------------------------------
-void	kf_SetHardLevel()
-{
-	// Bail out if we're running a _true_ multiplayer game (to prevent MP cheating)
-	if (runningMultiplayer())
+	setDifficultyLevel(level);
+	switch (level)
 	{
-		noMPCheatMsg();
-		return;
+		case DL_SUPER_EASY: addConsoleMessage(_("A power fantasy!"), LEFT_JUSTIFY, SYSTEM_MESSAGE); break;
+		case DL_EASY: addConsoleMessage(_("Taking things easy!"), LEFT_JUSTIFY, SYSTEM_MESSAGE); break;
+		case DL_NORMAL: addConsoleMessage(_("Back to normality!"), LEFT_JUSTIFY, SYSTEM_MESSAGE); break;
+		case DL_HARD: addConsoleMessage(_("Getting tricky!"), LEFT_JUSTIFY, SYSTEM_MESSAGE); break;
+		case DL_INSANE: addConsoleMessage(_("In a nightmare!"), LEFT_JUSTIFY, SYSTEM_MESSAGE);break;
+		default: break;
 	}
-
-	setDifficultyLevel(DL_HARD);
-	addConsoleMessage(_("Getting tricky!"), LEFT_JUSTIFY, SYSTEM_MESSAGE);
 }
 // --------------------------------------------------------------------------
 void	kf_DoubleUp()
@@ -746,7 +742,6 @@ void kf_ListDroids()
 			debug(LOG_INFO, "droid %i;%s;%i;%i;%i", i, psDroid->aName, psDroid->droidType, x, y);
 		}
 	}
-	
 }
 
 
@@ -1129,7 +1124,7 @@ MappableFunction kf_AssignGrouping_N(const unsigned int n)
 		/* not supported if a spectator */
 		SPECTATOR_NO_OP();
 
-		assignDroidsToGroup(selectedPlayer, n, true);
+		assignObjectToGroup(selectedPlayer, n, true);
 	};
 }
 
@@ -1139,7 +1134,7 @@ MappableFunction kf_AddGrouping_N(const unsigned int n)
 		/* not supported if a spectator */
 		SPECTATOR_NO_OP();
 
-		assignDroidsToGroup(selectedPlayer, n, false);
+		assignObjectToGroup(selectedPlayer, n, false);
 	};
 }
 
@@ -1149,7 +1144,7 @@ MappableFunction kf_RemoveFromGrouping()
 		/* not supported if a spectator */
 		SPECTATOR_NO_OP();
 
-		removeDroidsFromGroup(selectedPlayer);
+		removeObjectFromGroup(selectedPlayer);
 	};
 }
 
@@ -1491,6 +1486,10 @@ void	kf_FinishAllResearch()
 	{
 		if (!IsResearchCompleted(&asPlayerResList[selectedPlayer][j]))
 		{
+			if (asResearch[j].excludeFromCheats)
+			{
+				continue;
+			}
 			if (bMultiMessages)
 			{
 				SendResearch(selectedPlayer, j, false);
@@ -1498,7 +1497,6 @@ void	kf_FinishAllResearch()
 			}
 			else
 			{
-				MakeResearchCompleted(&asPlayerResList[selectedPlayer][j]);
 				researchResult(j, selectedPlayer, false, nullptr, false);
 			}
 		}
@@ -1567,18 +1565,27 @@ void	kf_FinishResearch()
 				if (pSubject)
 				{
 					int rindex = ((RESEARCH*)pSubject)->index;
-					if (bMultiMessages)
+					PLAYER_RESEARCH *plrRes = &asPlayerResList[selectedPlayer][rindex];
+					if (!IsResearchCompleted(plrRes))
 					{
-						SendResearch(selectedPlayer, rindex, true);
-						// Wait for our message before doing anything.
+						if (bMultiMessages)
+						{
+							SendResearch(selectedPlayer, rindex, true);
+							// Wait for our message before doing anything.
+						}
+						else
+						{
+							researchResult(rindex, selectedPlayer, true, psCurr, true);
+						}
+						std::string cmsg = astringf(_("(Player %u) is using cheat :%s %s"), selectedPlayer, _("Researched"), getLocalizedStatsName(pSubject));
+						sendInGameSystemMessage(cmsg.c_str());
+						intResearchFinished(psCurr);
 					}
 					else
 					{
-						researchResult(rindex, selectedPlayer, true, psCurr, true);
+						debug(LOG_ERROR, "Research already completed for player %" PRIu32 "?: %s", (int)selectedPlayer, getStatsName(pSubject));
+						continue;
 					}
-					std::string cmsg = astringf(_("(Player %u) is using cheat :%s %s"), selectedPlayer, _("Researched"), getLocalizedStatsName(pSubject));
-					sendInGameSystemMessage(cmsg.c_str());
-					intResearchFinished(psCurr);
 				}
 			}
 		}
@@ -2183,7 +2190,18 @@ void	kf_CentreOnBase()
 // --------------------------------------------------------------------------
 void kf_ToggleFormationSpeedLimiting()
 {
-	addConsoleMessage(_("Formation speed limiting has been removed from the game due to bugs."), LEFT_JUSTIFY, SYSTEM_MESSAGE);
+	bool resultingValue = false;
+	if (moveToggleFormationSpeedLimiting(selectedPlayer, &resultingValue))
+	{
+		if (resultingValue)
+		{
+			addConsoleMessage(_("Formation speed limiting ON"),LEFT_JUSTIFY, SYSTEM_MESSAGE);
+		}
+		else
+		{
+			addConsoleMessage(_("Formation speed limiting OFF"),LEFT_JUSTIFY, SYSTEM_MESSAGE);
+		}
+	}
 }
 
 // --------------------------------------------------------------------------
@@ -2543,6 +2561,11 @@ void kf_QuickSave()
 	{
 		return;
 	}
+	if (getCamTweakOption_AutosavesOnly())
+	{
+		console(_("QuickSave not allowed in Autosaves-Only mode"));
+		return;
+	}
 
 	const char *filename = bMultiPlayer ? QUICKSAVE_SKI_FILENAME : QUICKSAVE_CAM_FILENAME;
 	const char *quickSaveFolder = bMultiPlayer ? QUICKSAVE_SKI_FOLDER : QUICKSAVE_CAM_FOLDER;
@@ -2572,6 +2595,11 @@ void kf_QuickLoad()
 	{
 		return;
 	}
+	if (getCamTweakOption_AutosavesOnly())
+	{
+		console(_("QuickLoad not allowed in Autosaves-Only mode"));
+		return;
+	}
 
 	const char *filename = bMultiPlayer ? QUICKSAVE_SKI_FILENAME : QUICKSAVE_CAM_FILENAME;
 	// check for .json version, because that's what going to be loaded anyway
@@ -2584,8 +2612,6 @@ void kf_QuickLoad()
 		setWidgetsStatus(true);
 		intResetScreen(false);
 		wzSetCursor(CURSOR_DEFAULT);
-		int campaign = getCampaign(filename);
-		setCampaignNumber(campaign);
 
 		loopMissionState = LMS_LOADGAME;
 		sstrcpy(saveGameName, filename);

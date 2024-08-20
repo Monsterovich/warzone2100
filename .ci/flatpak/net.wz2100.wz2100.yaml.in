@@ -59,11 +59,11 @@ modules:
       - '*'
     buildsystem: simple
     build-commands:
-      - gem install --ignore-dependencies --no-user-install --verbose --local --install-dir /app/lib/ruby/gems/build-dep --bindir /app/bin asciidoctor-2.0.17.gem
+      - gem install --ignore-dependencies --no-user-install --verbose --local --install-dir /app/lib/ruby/gems/build-dep --bindir /app/bin asciidoctor-2.0.23.gem
     sources:
       - type: file
-        url: https://rubygems.org/downloads/asciidoctor-2.0.17.gem
-        sha256: ed5b5e399e8d64994cc16f0983f993d6e33990909a8415b6fc8b786cdeb00f3d
+        url: https://rubygems.org/downloads/asciidoctor-2.0.23.gem
+        sha256: 52208807f237dfa0ca29882f8b13d60b820496116ad191cf197ca56f2b7fddf3
 
   - name: sentry-native
     cleanup:
@@ -95,6 +95,7 @@ modules:
     buildsystem: cmake-ninja
     builddir: true
     build-options:
+      strip: true
       no-debuginfo: true
     # Always build for host - do not include WZ_CROSS_BUILD_OPTIONS
     cleanup:
@@ -110,21 +111,21 @@ modules:
     sources:
       - type: git
         url: https://github.com/google/shaderc.git
-        tag: v2023.7
-        commit: 3882b16417077aa8eaa7b5775920e7ba4b8a224d
+        tag: v2024.1
+        commit: 47a9387ef5b3600d30d84c71ec77a59dc7db46fa
       # Replicate the needed functionality of utils/git-sync-deps
       # To avoid having to break the build sandbox to download files
       - type: git
         url: https://github.com/KhronosGroup/SPIRV-Headers.git
-        commit: 4183b260f4cccae52a89efdfcdd43c4897989f42 # retrieved from DEPS in https://github.com/google/shaderc @ tag
+        commit: 5e3ad389ee56fca27c9705d093ae5387ce404df4 # retrieved from DEPS in https://github.com/google/shaderc @ tag
         dest: third_party/spirv-headers
       - type: git
         url: https://github.com/KhronosGroup/SPIRV-Tools.git
-        commit: 360d469b9eac54d6c6e20f609f9ec35e3a5380ad # retrieved from DEPS in https://github.com/google/shaderc @ tag
+        commit: dd4b663e13c07fea4fbb3f70c1c91c86731099f7 # retrieved from DEPS in https://github.com/google/shaderc @ tag
         dest: third_party/spirv-tools
       - type: git
         url: https://github.com/KhronosGroup/glslang.git
-        commit: 48f9ed8b08be974f4e463ef38136c8f23513b2cf # retrieved from DEPS in https://github.com/google/shaderc @ tag
+        commit: 142052fa30f9eca191aa9dcf65359fcaed09eeec # retrieved from DEPS in https://github.com/google/shaderc @ tag
         dest: third_party/glslang
 
   - name: physfs
@@ -138,8 +139,8 @@ modules:
     @WZ_CMAKE_CROSS_CONFIG_OPTIONS@
     sources:
       - type: archive
-        url: https://github.com/icculus/physfs/archive/eb3383b532c5f74bfeb42ec306ba2cf80eed988c.zip # PhysFS 3.2.0
-        sha512: 1068b1e0636b478f0d7910303e94d109923b2e4d809fa7a00232ba3733a4cd39c28d17851ff946859c431d7d7febdd229237cc10176eb5d5d19b49c887919fd8
+        url: https://github.com/icculus/physfs/archive/741c4be358cd87366af1387d1e04e3f7d4f50c1e.zip # PhysFS 3.2.0+
+        sha512: 56bfe808e28d7de6b9f242ca3ce81d08439480499c7d5901f78a3ec8ea75c55b71958515db015f101bb6b884a0a0f1140fab1a7222aff0bbe28555ebf378807f
       
   - name: fribidi
     buildsystem: meson
@@ -153,8 +154,8 @@ modules:
     sources:
       - type: git
         url: https://github.com/fribidi/fribidi
-        tag: v1.0.12
-        commit: 6428d8469e536bcbb6e12c7b79ba6659371c435a
+        tag: v1.0.15
+        commit: 2803ff176713a27d7edb57a24bc60c38a02182e9
 
   - name: libsodium
     @WZ_CROSS_BUILD_OPTIONS@
@@ -162,8 +163,8 @@ modules:
     @WZ_AUTOTOOLS_CROSS_CONFIG_OPTIONS@
     sources:
       - type: archive
-        url: https://github.com/jedisct1/libsodium/releases/download/1.0.18-RELEASE/libsodium-1.0.18.tar.gz
-        sha256: 6f504490b342a4f8a4c4a02fc9b866cbef8622d5df4e5452b46be121e46636c1
+        url: https://github.com/jedisct1/libsodium/releases/download/1.0.20-RELEASE/libsodium-1.0.20.tar.gz
+        sha256: ebb65ef6ca439333c2bb41a0c1990587288da07f6c7fd07cb3a18cc18d30ce19
 
   - name: warzone2100
     buildsystem: cmake-ninja
@@ -173,6 +174,7 @@ modules:
       - -DCMAKE_BUILD_TYPE=Release
       - -DWZ_SKIP_OUTPUT_NAME_SUFFIX_ON_BINARY=ON
       - -DWZ_APPSTREAM_ID=net.wz2100.wz2100
+      - -DENABLE_DISCORD:BOOL=ON
       - -DWZ_BUILD_SENTRY:BOOL=ON
       - -DWZ_SENTRY_PREDOWNLOADED_SENTRY_ARCHIVE=/app/prestaged-dl/sentry-native.zip
       - -DWZ_DOWNLOAD_PREBUILT_PACKAGES_ASSET_DIR=/app/prestaged-dl

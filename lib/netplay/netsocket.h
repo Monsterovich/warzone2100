@@ -1,7 +1,7 @@
 /*
 	This file is part of Warzone 2100.
 	Copyright (C) 1999-2004  Eidos Interactive
-	Copyright (C) 2005-2020  Warzone 2100 Project
+	Copyright (C) 2005-2024  Warzone 2100 Project
 
 	Warzone 2100 is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -100,35 +100,66 @@ Socket *socketListen(unsigned int port);                                ///< Cre
 WZ_DECL_NONNULL(1) Socket *socketAccept(Socket *sock);                  ///< Accepts an incoming Socket connection from a listening Socket.
 WZ_DECL_NONNULL(1) void socketClose(Socket *sock);                      ///< Destroys the Socket.
 Socket *socketOpenAny(const SocketAddress *addr, unsigned timeout);     ///< Opens a Socket, using the first address that works in addr.
-size_t socketArrayOpen(Socket **sockets, size_t maxSockets, const SocketAddress *addr, unsigned timeout);  ///< Opens up to maxSockets Sockets, of the types listed in addr.
-void socketArrayClose(Socket **sockets, size_t maxSockets);             ///< Closes all Sockets in the array.
-WZ_DECL_NONNULL(1) bool socketHasIPv4(Socket *sock);
-WZ_DECL_NONNULL(1) bool socketHasIPv6(Socket *sock);
+bool socketHasIPv4(const Socket& sock);
+bool socketHasIPv6(const Socket& sock);
 
-WZ_DECL_NONNULL(1) char const *getSocketTextAddress(Socket const *sock); ///< Gets a string with the socket address.
+char const *getSocketTextAddress(const Socket& sock); ///< Gets a string with the socket address.
 std::vector<unsigned char> ipv4_AddressString_To_NetBinary(const std::string& ipv4Address);
 std::vector<unsigned char> ipv6_AddressString_To_NetBinary(const std::string& ipv6Address);
 std::string ipv4_NetBinary_To_AddressString(const std::vector<unsigned char>& ip4NetBinaryForm);
 std::string ipv6_NetBinary_To_AddressString(const std::vector<unsigned char>& ip6NetBinaryForm);
-WZ_DECL_NONNULL(1) bool socketReadReady(Socket const *sock);            ///< Returns if checkSockets found data to read from this Socket.
-WZ_DECL_NONNULL(1, 2)
-ssize_t readNoInt(Socket *sock, void *buf, size_t max_size, size_t *rawByteCount = nullptr);  ///< Reads up to max_size bytes from the Socket. Raw count of bytes (after compression) returned in rawByteCount.
-WZ_DECL_NONNULL(1, 2)
-ssize_t readAll(Socket *sock, void *buf, size_t size, unsigned timeout);///< Reads exactly size bytes from the Socket, or blocks until the timeout expires.
-WZ_DECL_NONNULL(1, 2)
-ssize_t writeAll(Socket *sock, const void *buf, size_t size, size_t *rawByteCount = nullptr);  ///< Nonblocking write of size bytes to the Socket. All bytes will be written asynchronously, by a separate thread. Raw count of bytes (after compression) returned in rawByteCount, which will often be 0 until the socket is flushed.
+bool socketReadReady(const Socket& sock);            ///< Returns if checkSockets found data to read from this Socket.
+WZ_DECL_NONNULL(2)
+ssize_t readNoInt(Socket& sock, void *buf, size_t max_size, size_t *rawByteCount = nullptr);  ///< Reads up to max_size bytes from the Socket. Raw count of bytes (after compression) returned in rawByteCount.
+WZ_DECL_NONNULL(2)
+ssize_t readAll(Socket& sock, void *buf, size_t size, unsigned timeout);///< Reads exactly size bytes from the Socket, or blocks until the timeout expires.
+WZ_DECL_NONNULL(2)
+ssize_t writeAll(Socket& sock, const void *buf, size_t size, size_t *rawByteCount = nullptr);  ///< Nonblocking write of size bytes to the Socket. All bytes will be written asynchronously, by a separate thread. Raw count of bytes (after compression) returned in rawByteCount, which will often be 0 until the socket is flushed.
+
+bool socketSetTCPNoDelay(Socket& sock, bool nodelay); ///< nodelay = true disables the Nagle algorithm for TCP socket
 
 // Sockets, compressed.
-WZ_DECL_NONNULL(1) void socketBeginCompression(Socket *sock); ///< Makes future data sent compressed, and future data received expected to be compressed.
-WZ_DECL_NONNULL(1) bool socketReadDisconnected(Socket *sock);  ///< If readNoInt returned 0, returns true if this is the result of a disconnect, or false if the input compressed data just hasn't produced any output bytes.
-WZ_DECL_NONNULL(1) void socketFlush(Socket *sock, uint8_t player, size_t *rawByteCount = nullptr); ///< Actually sends the data written with writeAll. Only useful on compressed sockets. Note that flushing too often makes compression less effective. Raw count of bytes (after compression) returned in rawByteCount.
+void socketBeginCompression(Socket& sock); ///< Makes future data sent compressed, and future data received expected to be compressed.
+bool socketReadDisconnected(const Socket& sock);  ///< If readNoInt returned 0, returns true if this is the result of a disconnect, or false if the input compressed data just hasn't produced any output bytes.
+void socketFlush(Socket& sock, uint8_t player, size_t *rawByteCount = nullptr); ///< Actually sends the data written with writeAll. Only useful on compressed sockets. Note that flushing too often makes compression less effective. Raw count of bytes (after compression) returned in rawByteCount.
 
 // Socket sets.
 WZ_DECL_ALLOCATION SocketSet *allocSocketSet();                         ///< Constructs a SocketSet.
 WZ_DECL_NONNULL(1) void deleteSocketSet(SocketSet *set);                ///< Destroys the SocketSet.
 
-WZ_DECL_NONNULL(1, 2) void SocketSet_AddSocket(SocketSet *set, Socket *socket);  ///< Adds a Socket to a SocketSet.
-WZ_DECL_NONNULL(1, 2) void SocketSet_DelSocket(SocketSet *set, Socket *socket);  ///< Removes a Socket from a SocketSet.
-WZ_DECL_NONNULL(1) int checkSockets(const SocketSet *set, unsigned int timeout); ///< Checks which Sockets are ready for reading. Returns the number of ready Sockets, or returns SOCKET_ERROR on error.
+WZ_DECL_NONNULL(2) void SocketSet_AddSocket(SocketSet& set, Socket *socket);  ///< Adds a Socket to a SocketSet.
+WZ_DECL_NONNULL(2) void SocketSet_DelSocket(SocketSet& set, Socket *socket);  ///< Removes a Socket from a SocketSet.
+int checkSockets(const SocketSet& set, unsigned int timeout); ///< Checks which Sockets are ready for reading. Returns the number of ready Sockets, or returns SOCKET_ERROR on error.
+
+// Higher-level functions for opening a connection / socket
+struct OpenConnectionResult
+{
+public:
+	OpenConnectionResult(int error, std::string errorString)
+	: error(error)
+	, errorString(errorString)
+	{ }
+
+	OpenConnectionResult(Socket* open_socket)
+	: open_socket(open_socket)
+	{ }
+public:
+	bool hasError() const { return error != 0; }
+public:
+	OpenConnectionResult( const OpenConnectionResult& other ) = delete; // non construction-copyable
+	OpenConnectionResult& operator=( const OpenConnectionResult& ) = delete; // non copyable
+	OpenConnectionResult(OpenConnectionResult&&) = default;
+	OpenConnectionResult& operator=(OpenConnectionResult&&) = default;
+public:
+	struct SocketDeleter {
+		void operator()(Socket* b) { if (b) { socketClose(b); } }
+	};
+	std::unique_ptr<Socket, SocketDeleter> open_socket;
+	int error = 0;
+	std::string errorString;
+};
+typedef std::function<void (OpenConnectionResult&& result)> OpenConnectionToHostResultCallback;
+bool socketOpenTCPConnectionAsync(const std::string& host, uint32_t port, OpenConnectionToHostResultCallback callback);
+OpenConnectionResult socketOpenTCPConnectionSync(const char *host, uint32_t port);
 
 #endif //_net_socket_h

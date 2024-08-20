@@ -51,7 +51,7 @@ public:
 	void display(int xOffset, int yOffset) override;
 
 	void screenSizeDidChange(int oldWidth, int oldHeight, int newWidth, int newHeight) override;
-	bool hitTest(int x, int y) override;
+	bool hitTest(int x, int y) const override;
 	bool processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wasPressed) override;
 	void displayRecursive(WidgetGraphicsContext const &context) override;
 	using WIDGET::displayRecursive;
@@ -64,6 +64,10 @@ public:
 
 	bool            disableChildren;        ///< Disable all child widgets if true
 	bool			userMovable = false;	///< Whether the user can drag the form around (NOTE: should only be used with forms on overlay screens, currently)
+
+protected:
+	bool capturesMouseDrag(WIDGET_KEY) override;
+	void mouseDragged(WIDGET_KEY, W_CONTEXT *start, W_CONTEXT *current) override;
 
 private:
 	Vector2i calcMinimizedSize() const;

@@ -446,6 +446,7 @@ static SDWORD targetAttackWeight(BASE_OBJECT *psTarget, BASE_OBJECT *psAttacker,
 		switch (targetStructure->pStructureType->type)
 		{
 		case REF_DEFENSE:
+		case REF_FORTRESS:
 			targetTypeBonus = WEIGHT_WEAPON_STRUCT;
 			break;
 
@@ -603,6 +604,11 @@ int aiBestNearestTarget(DROID *psDroid, BASE_OBJECT **ppsObj, int weapon_slot, i
 	{
 		BASE_OBJECT *friendlyObj = nullptr;
 		BASE_OBJECT *targetInQuestion = *gi;
+
+		if (targetInQuestion == nullptr || isDead(targetInQuestion))
+		{
+			continue;
+		}
 
 		/* This is a friendly unit, check if we can reuse its target */
 		if (aiCheckAlliances(targetInQuestion->player, psDroid->player))

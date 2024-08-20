@@ -92,6 +92,7 @@ public:
 	DropdownWidget();
 
 	void addItem(const std::shared_ptr<WIDGET> &widget);
+	void clear();
 	void display(int xOffset, int yOffset) override;
 	void clicked(W_CONTEXT *psContext, WIDGET_KEY key) override;
 	void run(W_CONTEXT *) override;
@@ -115,6 +116,14 @@ public:
 	void setOnChange(std::function<void(DropdownWidget&)> value)
 	{
 		onChange = value;
+	}
+	std::shared_ptr<WIDGET> getItem(size_t idx) const
+	{
+		if (idx >= items.size())
+		{
+			return nullptr;
+		}
+		return items[idx]->getItem();
 	}
 	std::shared_ptr<WIDGET> getSelectedItem() const
 	{
@@ -176,6 +185,7 @@ private:
 	std::function<void(DropdownWidget&)> onChange;
 	std::shared_ptr<DropdownItemWrapper> mouseOverItem;
 	std::shared_ptr<DropdownItemWrapper> mouseDownItem;
+	int32_t overlayYPosOffset = 0;
 
 	bool select(const std::shared_ptr<DropdownItemWrapper> &selected, size_t selectedIndex)
 	{

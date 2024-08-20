@@ -62,6 +62,7 @@
 #include "challenge.h"
 #include "multistat.h"
 #include "gamehistorylogger.h"
+#include "campaigninfo.h"
 #include "hci/quickchat.h"
 
 #include <set>
@@ -175,7 +176,16 @@ scripting_engine::timerNode::timerNode(timerNode&& rhs)           // move constr
 
 void scripting_engine::timerNode::swap(timerNode& _rhs)
 {
+// On Fedora 40, GCC 14 produces false-positive warnings for -Wuninitialized
+// when compiling this code with optimizations. Silence these warnings.
+#if !defined(__clang__) && !defined(__INTEL_COMPILER) && defined(__GNUC__) && __GNUC__ >= 14 && defined(__OPTIMIZE__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wuninitialized"
+#endif
 	std::swap(timerID, _rhs.timerID);
+#if !defined(__clang__) && !defined(__INTEL_COMPILER) && defined(__GNUC__) && __GNUC__ >= 14 && defined(__OPTIMIZE__)
+# pragma GCC diagnostic pop
+#endif
 	std::swap(function, _rhs.function);
 	std::swap(timerName, _rhs.timerName);
 	std::swap(instance, _rhs.instance);
@@ -555,8 +565,8 @@ wzapi::scripting_instance* scripting_engine::loadPlayerScript(const WzString& pa
 	globalVars["selectedPlayer"] = selectedPlayer;
 	//== * ```gameTime``` The current game time. Updated before every invokation of a script.
 	pNewInstance->setSpecifiedGlobalVariable("gameTime", gameTime, wzapi::GlobalVariableFlags::ReadOnlyUpdatedFromApp | wzapi::GlobalVariableFlags::DoNotSave);
-	//== * ```modList``` The current loaded mods.
-	globalVars["modList"] = getModList();
+	//== * ```modList``` An array of the current loaded mods (mod names).
+	globalVars["modList"] = getModNamesList();
 
 
 	//== * ```difficulty``` The currently set campaign difficulty, or the current AI's difficulty setting. It will be one of
@@ -612,6 +622,8 @@ wzapi::scripting_instance* scripting_engine::loadPlayerScript(const WzString& pa
 	globalVars["gameTimeLimit"] = game.gameTimeLimitMinutes * 60 * 1000;
 	//== * ```playerLeaveMode``` The mode used to handle human players leaving a multiplayer game in progress. (0 = destroy resources, 1 = split resources with team) (4.4.0+ only)
 	globalVars["playerLeaveMode"] = static_cast<uint8_t>(game.playerLeaveMode);
+	//== * ```tweakOptions``` The tweakOptions offered by the current mod / mode, as configured by the user. (4.5.0+ only)
+	globalVars["tweakOptions"] = getCamTweakOptions();
 
 	pNewInstance->setSpecifiedGlobalVariables(globalVars, wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
 
@@ -1313,6 +1325,26 @@ bool triggerEventStructureUpgradeStarted(STRUCTURE *psStruct)
 	return true;
 }
 
+//__ ## eventDroidRankGained(droid, rankNum)
+//__
+//__ An event that is run whenever a droid gains a rank.
+//__
+bool triggerEventDroidRankGained(const DROID *psDroid, int rankNum)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	if (!psDroid) { return true; }
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psDroid->player || receiveAll)
+		{
+			instance->handle_eventDroidRankGained(psDroid, rankNum);
+		}
+	}
+	return true;
+}
+
 //__ ## eventAttacked(victim, attacker)
 //__
 //__ An event that is run when an object belonging to the script's controlling player is
@@ -1760,9 +1792,9 @@ std::vector<scripting_engine::LabelInfo> scripting_engine::debug_GetLabelInfo() 
 
 void clearMarks()
 {
-	for (int x = 0; x < mapWidth; x++) // clear old marks
+	for (int y = 0; y < mapHeight; y++)
 	{
-		for (int y = 0; y < mapHeight; y++)
+		for (int x = 0; x < mapWidth; x++) // clear old marks
 		{
 			MAPTILE *psTile = mapTile(x, y);
 			psTile->tileInfoBits &= ~BITS_MARKED;

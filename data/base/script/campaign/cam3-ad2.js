@@ -16,6 +16,17 @@ const mis_nexusRes = [
 	"R-Wpn-Energy-Damage03", "R-Wpn-Energy-ROF03", "R-Wpn-Energy-Accuracy01",
 	"R-Wpn-AAGun-Accuracy03", "R-Wpn-Howitzer-Accuracy03", "R-Sys-NEXUSsensor",
 ];
+const mis_nexusResClassic = [
+	"R-Defense-WallUpgrade09", "R-Struc-Materials09", "R-Struc-Factory-Upgrade06",
+	"R-Struc-VTOLPad-Upgrade06", "R-Vehicle-Engine09", "R-Vehicle-Metals09",
+	"R-Cyborg-Metals09", "R-Vehicle-Armor-Heat06", "R-Cyborg-Armor-Heat06",
+	"R-Sys-Engineering03", "R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02",
+	"R-Wpn-Bomb-Damage03", "R-Wpn-Energy-Accuracy01", "R-Wpn-Energy-Damage03",
+	"R-Wpn-Energy-ROF03", "R-Wpn-Missile-Accuracy01", "R-Wpn-Missile-Damage02",
+	"R-Wpn-Rail-Accuracy01", "R-Wpn-Rail-Damage03", "R-Wpn-Rail-ROF03",
+	"R-Sys-Sensor-Upgrade01", "R-Sys-NEXUSrepair", "R-Wpn-Flamer-Damage06",
+	"R-Sys-NEXUSsensor",
+];
 const mis_vtolPositions = [
 	"vtolAppearPosW", "vtolAppearPosE",
 ];
@@ -89,15 +100,28 @@ function wave3()
 //Setup Nexus VTOL hit and runners. Choose a random spawn point for the VTOLs.
 function vtolAttack()
 {
-	const list = [cTempl.nxmheapv, cTempl.nxmtherv];
-	const ext = {
-		limit: [4, 4], //paired with list array
-		alternate: true,
-		altIdx: 0
-	};
-	camSetVtolData(CAM_NEXUS, mis_vtolPositions, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)), undefined, ext);
-	queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
-	queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	if (camClassicMode())
+	{
+		const list = [cTempl.nxlpulsev, cTempl.nxmheapv, cTempl.nxmheapv, cTempl.nxlpulsev];
+		const ext = {
+			limit: [2, 5, 5, 2], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, mis_vtolPositions, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)), undefined, ext);
+	}
+	else
+	{
+		const list = [cTempl.nxmheapv, cTempl.nxmtherv];
+		const ext = {
+			limit: [4, 4], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, mis_vtolPositions, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)), undefined, ext);
+		queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
+		queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	}
 }
 
 //Chose a random spawn point to send ground reinforcements.
@@ -186,11 +210,22 @@ function vaporizeTarget()
 		}
 		if (Math.floor(mapLimit) < mapHeight)
 		{
-			//Need to travel about 119 tiles in ~1 hour so:
-			//119 tiles / 60 minutes = 1.983 tiles per minute
-			//1.983 tile per minute / 60 seconds = 0.03305 tiles per second
-			//0.03305 * 10 sec = ~0.33 tiles per blast at 10 second intervals.
-			mapLimit += 0.33; //sector clear; move closer
+			if (camClassicMode() && tweakOptions.camClassic_balance32)
+			{
+				//Need to travel about 119 tiles in 80 minutes so:
+				//119 tiles / 80 minutes = 1.4875 tiles per minute
+				//1.4875 tile per minute / 60 seconds = 0.02479 tiles per second
+				//0.02479 * 10 sec = ~0.24 tiles per blast at 10 second intervals.
+				mapLimit += 0.24; //sector clear; move closer
+			}
+			else
+			{
+				//Need to travel about 119 tiles in ~1 hour so:
+				//119 tiles / 60 minutes = 1.9833 tiles per minute
+				//1.9833 tile per minute / 60 seconds = 0.03305 tiles per second
+				//0.03305 * 10 sec = ~0.33 tiles per blast at 10 second intervals.
+				mapLimit += 0.33; //sector clear; move closer
+			}
 		}
 		laserSatFuzzyStrike(target);
 	}
@@ -282,7 +317,14 @@ function checkTime()
 	if (getMissionTime() <= 2)
 	{
 		camPlayVideos({video: "MB3_AD2_MSG2", type: CAMP_MSG});
-		setMissionTime(camHoursToSeconds(1));
+		if (camClassicMode() && tweakOptions.camClassic_balance32)
+		{
+			setMissionTime(camMinutesToSeconds(80)); // To accommodate the research bug of 3.2 balance.
+		}
+		else
+		{
+			setMissionTime(camHoursToSeconds(1));
+		}
 
 		phantomFactorySpawn();
 		queue("vaporizeTarget", camSecondsToMilliseconds(2));
@@ -322,7 +364,7 @@ function eventStartLevel()
 		{played: false, video: "MB3_AD2_MSG6", type: CAMP_MSG, res: mis_researchTargets.missileCode3},
 	];
 
-	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, "CAM_3_4S", {
+	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, cam_levels.gammaEnd.pre, {
 		callback: "checkMissileSilos"
 	});
 
@@ -340,7 +382,15 @@ function eventStartLevel()
 	setMissionTime(camMinutesToSeconds(5));
 	enableResearch(mis_researchTargets.resistance, CAM_HUMAN_PLAYER);
 
-	camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_nexusResClassic, CAM_NEXUS);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
+	}
+
 	camPlayVideos({video: "MB3_AD2_MSG", type: MISS_MSG});
 
 	setTimer("checkTime", camSecondsToMilliseconds(0.2));

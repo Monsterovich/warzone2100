@@ -75,6 +75,7 @@
 #include "keybind.h"
 #include "qtscript.h"
 #include "chat.h"
+#include "radar.h"
 #include "hci/build.h"
 #include "hci/research.h"
 #include "hci/manufacture.h"
@@ -82,6 +83,7 @@
 #include "notifications.h"
 #include "hci/groups.h"
 #include "screens/chatscreen.h"
+#include "screens/guidescreen.h"
 #include "hci/quickchat.h"
 
 // Empty edit window
@@ -339,7 +341,7 @@ void setReticuleButtonDimensions(W_BUTTON &button, const WzString &filename)
 		button.setGeometry(button.x(), button.y(), image->Width / 2, image->Height / 2);
 
 		// add a custom hit-testing function that uses a tighter bounding ellipse
-		button.setCustomHitTest([](WIDGET *psWidget, int x, int y) -> bool {
+		button.setCustomHitTest([](const WIDGET *psWidget, int x, int y) -> bool {
 
 			// determine center of ellipse contained within the bounding rect
 			float centerX = ((psWidget->x()) + (psWidget->x() + psWidget->width())) / 2.f;
@@ -355,6 +357,12 @@ void setReticuleButtonDimensions(W_BUTTON &button, const WzString &filename)
 			return partX + partY <= 1.f;
 		});
 	}
+}
+
+optional<std::string> getReticuleButtonDisplayFilename(int ButId)
+{
+	ASSERT_OR_RETURN(nullopt, (ButId >= 0) && (ButId < NUMRETBUTS), "Invalid ButId: %d", ButId);
+	return retbutstats[ButId].filename.toUtf8();
 }
 
 void setReticuleStats(int ButId, std::string tip, std::string filename, std::string filenameDown, const playerCallbackFunc& callbackFunc)
@@ -994,6 +1002,7 @@ void interfaceShutDown()
 	}
 
 	shutdownChatScreen();
+	closeGuideScreen();
 	ChatDialogUp = false;
 
 	bAllowOtherKeyPresses = true;
@@ -1019,6 +1028,13 @@ void intRefreshGroupsUI()
 	IntGroupsRefreshPending = true;
 }
 
+bool intAddRadarWidget()
+{
+	auto radarWidget = getRadarWidget();
+	ASSERT_OR_RETURN(false, radarWidget != nullptr, "Failed to get radar widget?");
+	psWScreen->psForm->attach(radarWidget, WIDGET::ChildZPos::Back);
+	return true;
+}
 
 // see if a delivery point is selected
 static FLAG_POSITION *intFindSelectedDelivPoint()
@@ -1180,6 +1196,8 @@ void intResetScreen(bool NoAnim, bool skipMissionResultScreen /*= false*/)
 		}
 	}
 
+	auto startingIntMode = intMode;
+
 	switch (intMode)
 	{
 	case INT_DESIGN:
@@ -1220,7 +1238,10 @@ void intResetScreen(bool NoAnim, bool skipMissionResultScreen /*= false*/)
 	{
 		intRemoveMissionResultNoAnim();
 	}
-	intRemoveDesign();
+	if (startingIntMode == INT_DESIGN)
+	{
+		intRemoveDesign();
+	}
 	intHidePowerBar();
 
 	if (interfaceController)
@@ -1939,6 +1960,23 @@ void intDisplayWidgets()
 				displayConsoleMessages();
 			}
 		}
+	}
+
+	bool desiredRadarVisibility = false;
+	if (!gameUpdatePaused())
+	{
+		desiredRadarVisibility = radarVisible();
+
+		cleanupOldBeaconMessages();
+
+		/* Ensure that any text messages are displayed at bottom of screen */
+		displayConsoleMessages();
+	}
+
+	auto radarWidget = getRadarWidget();
+	if (radarWidget && (desiredRadarVisibility != radarWidget->visible()))
+	{
+		(desiredRadarVisibility) ? radarWidget->show() : radarWidget->hide();
 	}
 
 	widgDisplayScreen(psWScreen);

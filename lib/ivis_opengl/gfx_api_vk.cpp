@@ -1279,9 +1279,9 @@ std::array<vk::PipelineColorBlendAttachmentState, 1> VkPSO::to_vk(const REND_MOD
 				.setBlendEnable(true)
 				.setColorBlendOp(vk::BlendOp::eAdd)
 				.setAlphaBlendOp(vk::BlendOp::eAdd)
-				.setSrcColorBlendFactor(vk::BlendFactor::eZero)
-				.setSrcAlphaBlendFactor(vk::BlendFactor::eZero)
-				.setDstColorBlendFactor(vk::BlendFactor::eSrcColor)
+				.setSrcColorBlendFactor(vk::BlendFactor::eDstColor)
+				.setSrcAlphaBlendFactor(vk::BlendFactor::eDstAlpha)
+				.setDstColorBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha)
 				.setDstAlphaBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha)
 				.setColorWriteMask(vk_color_mask)
 		};
@@ -1988,7 +1988,7 @@ size_t VkTexture::format_size(const vk::Format& format)
 }
 
 VkTexture::VkTexture(const VkRoot& root, const std::size_t& mipmap_count, const std::size_t& width, const std::size_t& height, const gfx_api::pixel_format& _internal_format, const std::string& filename)
-	: dev(root.dev), internal_format(_internal_format), mipmap_levels(mipmap_count), root(&root)
+	: dev(root.dev), internal_format(_internal_format), mipmap_levels(mipmap_count), tex_width(width), tex_height(height), root(&root)
 {
 	ASSERT(width > 0 && height > 0, "0 width/height textures are unsupported");
 	ASSERT(width <= static_cast<size_t>(std::numeric_limits<uint32_t>::max()), "width (%zu) exceeds uint32_t max", width);
@@ -2256,6 +2256,11 @@ bool VkTexture::upload_sub(const size_t& mip_level, const size_t& offset_x, cons
 }
 
 unsigned VkTexture::id() { return 0; }
+
+gfx_api::texture2dDimensions VkTexture::get_dimensions() const
+{
+	return {tex_width, tex_height};
+}
 
 size_t VkTexture::backend_internal_value() const
 {
@@ -4994,7 +4999,28 @@ bool VkRoot::createAllocator()
 	ASSERT(physicalDevice, "Physical device is null");
 	ASSERT(dev, "Logical device is null");
 
-	VmaVulkanFunctions vulkanFunctions;
+	VmaAllocatorCreateInfo allocatorInfo = {};
+	allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXTERNALLY_SYNCHRONIZED_BIT;
+	allocatorInfo.physicalDevice = physicalDevice;
+	allocatorInfo.device = dev;
+	allocatorInfo.instance = inst;
+	// According to vk_mem_alloc.h:
+	// vulkanApiVersion "must match the Vulkan version used by the application and supported on the selected physical device,
+	// so it must be no higher than `VkApplicationInfo::apiVersion` passed to `vkCreateInstance`
+	// and no higher than `VkPhysicalDeviceProperties::apiVersion` found on the physical device used."
+	allocatorInfo.vulkanApiVersion = std::min(instanceCreateInfo.pApplicationInfo->apiVersion, physDeviceProps.apiVersion);
+	debug(LOG_3D, "Using VMA allocator vulkanApiVersion: %s", VkhInfo::vulkan_apiversion_to_string(allocatorInfo.vulkanApiVersion).c_str());
+
+	bool enabled_VK_KHR_get_memory_requirements2 = std::find_if(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(),
+														 [](const char *extensionName) { return (strcmp(extensionName, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0);}) != enabledDeviceExtensions.end();
+	bool enabled_VK_KHR_dedicated_allocation = std::find_if(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(),
+																[](const char *extensionName) { return (strcmp(extensionName, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0);}) != enabledDeviceExtensions.end();
+	if (enabled_VK_KHR_get_memory_requirements2 && enabled_VK_KHR_dedicated_allocation)
+	{
+		allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT;
+	}
+
+	VmaVulkanFunctions vulkanFunctions = {};
 	vulkanFunctions.vkGetInstanceProcAddr = vkDynLoader.vkGetInstanceProcAddr;
 	vulkanFunctions.vkGetDeviceProcAddr = vkDynLoader.vkGetDeviceProcAddr;
 	vulkanFunctions.vkGetPhysicalDeviceProperties = vkDynLoader.vkGetPhysicalDeviceProperties;
@@ -5025,26 +5051,35 @@ bool VkRoot::createAllocator()
 #if VMA_MEMORY_BUDGET || VMA_VULKAN_VERSION >= 1001000
 	vulkanFunctions.vkGetPhysicalDeviceMemoryProperties2KHR = vkDynLoader.vkGetPhysicalDeviceMemoryProperties2KHR;
 #endif
-#if VMA_VULKAN_VERSION >= 1003000
-	vulkanFunctions.vkGetDeviceBufferMemoryRequirements = vkDynLoader.vkGetDeviceBufferMemoryRequirements;
-	vulkanFunctions.vkGetDeviceImageMemoryRequirements = vkDynLoader.vkGetDeviceImageMemoryRequirements;
+
+// Vulkan 1.1
+#if VMA_VULKAN_VERSION >= 1001000
+	if(allocatorInfo.vulkanApiVersion >= VK_MAKE_VERSION(1, 1, 0))
+	{
+		vulkanFunctions.vkGetBufferMemoryRequirements2KHR = vkDynLoader.vkGetBufferMemoryRequirements2;
+		vulkanFunctions.vkGetImageMemoryRequirements2KHR = vkDynLoader.vkGetImageMemoryRequirements2;
+		vulkanFunctions.vkBindBufferMemory2KHR = vkDynLoader.vkBindBufferMemory2;
+		vulkanFunctions.vkBindImageMemory2KHR = vkDynLoader.vkBindImageMemory2;
+	}
 #endif
 
-	VmaAllocatorCreateInfo allocatorInfo = {};
-	allocatorInfo.physicalDevice = physicalDevice;
-	allocatorInfo.device = dev;
-	allocatorInfo.instance = inst;
-	allocatorInfo.pVulkanFunctions = &vulkanFunctions;
-	allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_EXTERNALLY_SYNCHRONIZED_BIT;
-
-	bool enabled_VK_KHR_get_memory_requirements2 = std::find_if(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(),
-														 [](const char *extensionName) { return (strcmp(extensionName, VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME) == 0);}) != enabledDeviceExtensions.end();
-	bool enabled_VK_KHR_dedicated_allocation = std::find_if(enabledDeviceExtensions.begin(), enabledDeviceExtensions.end(),
-																[](const char *extensionName) { return (strcmp(extensionName, VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME) == 0);}) != enabledDeviceExtensions.end();
-	if (enabled_VK_KHR_get_memory_requirements2 && enabled_VK_KHR_dedicated_allocation)
+#if VMA_VULKAN_VERSION >= 1001000
+	if(allocatorInfo.vulkanApiVersion >= VK_MAKE_VERSION(1, 1, 0))
 	{
-		allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_KHR_DEDICATED_ALLOCATION_BIT;
+		vulkanFunctions.vkGetPhysicalDeviceMemoryProperties2KHR = vkDynLoader.vkGetPhysicalDeviceMemoryProperties2;
 	}
+#endif
+
+// Vulkan 1.3
+#if VMA_VULKAN_VERSION >= 1003000
+	if(allocatorInfo.vulkanApiVersion >= VK_MAKE_VERSION(1, 3, 0))
+	{
+		vulkanFunctions.vkGetDeviceBufferMemoryRequirements = vkDynLoader.vkGetDeviceBufferMemoryRequirements;
+		vulkanFunctions.vkGetDeviceImageMemoryRequirements = vkDynLoader.vkGetDeviceImageMemoryRequirements;
+	}
+#endif
+
+	allocatorInfo.pVulkanFunctions = &vulkanFunctions;
 
 	VkResult result = vmaCreateAllocator(&allocatorInfo, &allocator);
 	if (result != VK_SUCCESS)

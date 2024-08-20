@@ -15,8 +15,18 @@ const mis_nexusRes = [
 	"R-Wpn-Energy-Damage02", "R-Wpn-Energy-ROF01", "R-Wpn-Energy-Accuracy01",
 	"R-Sys-NEXUSsensor",
 ];
+const mis_nexusResClassic = [
+	"R-Defense-WallUpgrade07", "R-Struc-Materials07", "R-Struc-Factory-Upgrade06",
+	"R-Struc-VTOLPad-Upgrade06", "R-Vehicle-Engine09", "R-Vehicle-Metals06",
+	"R-Cyborg-Metals07", "R-Vehicle-Armor-Heat05", "R-Cyborg-Armor-Heat05",
+	"R-Sys-Engineering03", "R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02",
+	"R-Wpn-Bomb-Damage03", "R-Wpn-Missile-Damage01", "R-Wpn-Missile-ROF01",
+	"R-Wpn-Rail-Damage01", "R-Wpn-Rail-ROF01", "R-Sys-Sensor-Upgrade01",
+	"R-Sys-NEXUSrepair", "R-Wpn-Flamer-Damage06", "R-Sys-NEXUSsensor",
+];
 var launchInfo;
 var detonateInfo;
+var allInValley;
 
 //Remove Nexus VTOL droids.
 camAreaEvent("vtolRemoveZone", function(droid)
@@ -86,15 +96,28 @@ function wave3()
 //Setup Nexus VTOL hit and runners.
 function vtolAttack()
 {
-	const list = [cTempl.nxmtherv, cTempl.nxmtherv];
-	const ext = {
-		limit: [2, 2], //paired with list array
-		alternate: true,
-		altIdx: 0
-	};
-	camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(5)), "NXCommandCenter", ext);
-	queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
-	queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	if (camClassicMode())
+	{
+		const list = [cTempl.nxlscouv, cTempl.nxmtherv];
+		const ext = {
+			limit: [2, 3], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(5)), "NXCommandCenter", ext);
+	}
+	else
+	{
+		const list = [cTempl.nxmtherv, cTempl.nxmtherv];
+		const ext = {
+			limit: [2, 2], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, "vtolAppearPos", "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(5)), "NXCommandCenter", ext);
+		queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
+		queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	}
 }
 
 //These groups are active immediately.
@@ -148,10 +171,9 @@ function missileSilosDestroyed()
 //Nuclear missile destroys everything not in safe zone.
 function nukeAndCountSurvivors()
 {
-	//Avoid destroying the one base if the player opted not to destroy it themselves.
-	const nuked = enumArea(0, 0, mapWidth, mapHeight, ALL_PLAYERS, false).filter((obj) => (
-		obj.type !== STRUCTURE || (obj.type === STRUCTURE && obj.group === null)
-	));
+	// Remove the base in the rare event an auto-explosion triggers as we nuke the base here.
+	camSetEnemyBases({});
+	const nuked = enumArea(0, 0, mapWidth, mapHeight, ALL_PLAYERS, false);
 	const safeZone = enumArea("valleySafeZone", CAM_HUMAN_PLAYER, false);
 	let foundUnit = false;
 
@@ -197,7 +219,7 @@ function setupNextMission()
 		camPlayVideos([cam_sounds.missile.launch.missileLaunchAborted, {video: "MB3_1B_MSG", type: CAMP_MSG}, {video: "MB3_1B_MSG2", type: MISS_MSG}]);
 
 		setScrollLimits(0, 0, 64, 64); //Reveal the whole map.
-		setMissionTime(camChangeOnDiff(camMinutesToSeconds(30)));
+		setMissionTime(camChangeOnDiff(camMinutesToSeconds((tweakOptions.classicTimers) ? 25 : 30)));
 
 		hackRemoveMessage("CM31_TAR_UPLINK", PROX_MSG, CAM_HUMAN_PLAYER);
 		hackAddMessage("CM31_HIDE_LOC", PROX_MSG, CAM_HUMAN_PLAYER);
@@ -253,6 +275,15 @@ function enableAllFactories()
 //For now just make sure we have all the droids in the canyon.
 function unitsInValley()
 {
+	if (!camAllArtifactsPickedUp())
+	{
+		return;
+	}
+	if (allInValley)
+	{
+		return true;
+	}
+
 	const safeZone = enumArea("valleySafeZone", CAM_HUMAN_PLAYER, false).filter((obj) => (
 		obj.type === DROID
 	));
@@ -264,6 +295,7 @@ function unitsInValley()
 	{
 		if (nukeAndCountSurvivors())
 		{
+			allInValley = true;
 			return true;
 		}
 		else
@@ -281,6 +313,7 @@ function eventStartLevel()
 	const lz = getObject("landingZone");
 	const tEnt = getObject("transporterEntry");
 	const tExt = getObject("transporterExit");
+	allInValley = false;
 
 	//Time is in seconds.
 	launchInfo = [
@@ -317,8 +350,9 @@ function eventStartLevel()
 		{sound: cam_sounds.missile.countdown, time: 10},
 	];
 
-	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, "CAM_3B", {
+	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, cam_levels.gamma3, {
 		area: "RTLZ",
+		playLzReminder: false,
 		reinforcements: camMinutesToSeconds(3),
 		callback: "unitsInValley"
 	});
@@ -329,12 +363,19 @@ function eventStartLevel()
 	setTransporterExit(tExt.x, tExt.y, CAM_HUMAN_PLAYER);
 	setScrollLimits(0, 32, 64, 64);
 
-	camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_nexusResClassic, CAM_NEXUS);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
 
-	camSetArtifacts({
-		"NXMediumFac": { tech: "R-Wpn-Cannon-Damage08" },
-		"NXCommandCenter": { tech: "R-Defense-WallUpgrade08" },
-	});
+		camSetArtifacts({
+			"NXMediumFac": { tech: "R-Wpn-Cannon-Damage08" },
+			"NXCommandCenter": { tech: "R-Defense-WallUpgrade08" },
+		});
+	}
 
 	camSetEnemyBases({
 		"NX-SWBase": {

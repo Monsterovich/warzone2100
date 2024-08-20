@@ -45,6 +45,10 @@
 #include "wrappers.h"
 #include "titleui/titleui.h"
 
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
+
 struct STAR
 {
 	int      xPos;
@@ -178,11 +182,9 @@ TITLECODE titleLoop()
 			else // single player
 			{
 				NetPlay.bComms = true; // use network = true
-				NetPlay.isUPNP_CONFIGURED = false;
-				NetPlay.isUPNP_ERROR = false;
 				bMultiMessages = true;
 				NETinit(true);
-				NETdiscoverUPnPDevices();
+				NETinitPortMapping();
 			}
 			bMultiPlayer = true;
 			ingame.side = InGameSide::HOST_OR_SINGLEPLAYER;
@@ -278,6 +280,20 @@ void loadingScreenCallback()
 	wzPumpEventsWhileLoading();
 }
 
+#if defined(__EMSCRIPTEN__)
+void wzemscripten_display_web_loading_indicator(int x)
+{
+	MAIN_THREAD_EM_ASM({
+		if (typeof wz_js_display_loading_indicator === "function") {
+			wz_js_display_loading_indicator($0);
+		}
+		else {
+			console.log('Cannot find wz_js_display_loading_indicator function');
+		}
+	}, x);
+}
+#endif
+
 // fill buffers with the static screen
 void initLoadingScreen(bool drawbdrop)
 {
@@ -286,8 +302,12 @@ void initLoadingScreen(bool drawbdrop)
 	wzShowMouse(false);
 	pie_SetFogStatus(false);
 
+#if !defined(__EMSCRIPTEN__)
 	// setup the callback....
 	resSetLoadCallback(loadingScreenCallback);
+#else
+	wzemscripten_display_web_loading_indicator(1);
+#endif
 
 	if (drawbdrop)
 	{
@@ -311,7 +331,11 @@ void closeLoadingScreen()
 		free(stars);
 		stars = nullptr;
 	}
+#if !defined(__EMSCRIPTEN__)
 	resSetLoadCallback(nullptr);
+#else
+	wzemscripten_display_web_loading_indicator(0);
+#endif
 }
 
 

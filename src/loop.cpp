@@ -87,6 +87,7 @@
 #include "clparse.h"
 #include "gamehistorylogger.h"
 #include "profiling.h"
+#include "wzapi.h"
 
 #include "warzoneconfig.h"
 
@@ -218,28 +219,31 @@ static GAMECODE renderLoop()
 		// Using software cursors (when on) for these menus due to a bug in SDL's SDL_ShowCursor()
 		wzSetCursor(CURSOR_DEFAULT);
 
-		if (dragBox3D.status != DRAG_DRAGGING)
+		if (!scrollPaused() && dragBox3D.status != DRAG_DRAGGING)
 		{
 			displayRenderLoop();
 		}
 
-		if (InGameOpUp || isInGamePopupUp || intHelpOverlayIsUp())		// ingame options menu up, run it!
+		if (!bLoadSaveUp)
 		{
-			WidgetTriggers const &triggers = widgRunScreen(psWScreen);
-			unsigned widgval = triggers.empty() ? 0 : triggers.front().widget->id; // Just use first click here, since the next click could be on another menu.
+			WidgetTriggers const &triggers = widgRunScreen(psWScreen);		// always run the screen, so overlays can process input
 
-			intProcessInGameOptions(widgval);
-			if (widgval == INTINGAMEOP_QUIT || widgval == INTINGAMEOP_POPUP_QUIT)
+			if (InGameOpUp || isInGamePopupUp || intHelpOverlayIsUp())		// ingame options menu up, run it!
 			{
-				if (gamePaused())
+				unsigned widgval = triggers.empty() ? 0 : triggers.front().widget->id; // Just use first click here, since the next click could be on another menu.
+
+				intProcessInGameOptions(widgval);
+				if (widgval == INTINGAMEOP_QUIT || widgval == INTINGAMEOP_POPUP_QUIT)
 				{
-					kf_TogglePauseMode();
+					if (gamePaused())
+					{
+						kf_TogglePauseMode();
+					}
+					intRetVal = INT_QUIT;
 				}
-				intRetVal = INT_QUIT;
 			}
 		}
-
-		if (bLoadSaveUp && runLoadSave(true) && strlen(sRequestResult))
+		else if (runLoadSave(true) && strlen(sRequestResult))
 		{
 			debug(LOG_NEVER, "Returned %s", sRequestResult);
 			if (bRequestLoad)
@@ -308,12 +312,6 @@ static GAMECODE renderLoop()
 	{
 		if (!gameUpdatePaused())
 		{
-			if (dragBox3D.status != DRAG_DRAGGING
-			    && wallDrag.status != DRAG_DRAGGING
-			    && intRetVal != INT_INTERCEPT)
-			{
-				ProcessRadarInput();
-			}
 			processInput();
 
 			//no key clicks or in Intelligence Screen
@@ -321,7 +319,6 @@ static GAMECODE renderLoop()
 			{
 				processMouseClickInput();
 			}
-			bRender3DOnly = false;
 			displayWorld();
 		}
 		wzPerfBegin(PERF_GUI, "User interface");
@@ -460,7 +457,11 @@ void countUpdate(bool synch)
 		setLasSatExists(false, i);
 		for (const STRUCTURE *psCBuilding : apsStructLists[i])
 		{
-			if (psCBuilding->pStructureType->type == REF_SAT_UPLINK && psCBuilding->status == SS_BUILT)
+			if (psCBuilding == nullptr || isDead(psCBuilding))
+			{
+				continue;
+			}
+			if (psCBuilding->pStructureType && psCBuilding->pStructureType->type == REF_SAT_UPLINK && psCBuilding->status == SS_BUILT)
 			{
 				setSatUplinkExists(true, i);
 			}
@@ -472,7 +473,11 @@ void countUpdate(bool synch)
 		}
 		for (const STRUCTURE *psCBuilding : mission.apsStructLists[i])
 		{
-			if (psCBuilding->pStructureType->type == REF_SAT_UPLINK && psCBuilding->status == SS_BUILT)
+			if (psCBuilding == nullptr || isDead(psCBuilding))
+			{
+				continue;
+			}
+			if (psCBuilding->pStructureType && psCBuilding->pStructureType->type == REF_SAT_UPLINK && psCBuilding->status == SS_BUILT)
 			{
 				setSatUplinkExists(true, i);
 			}
@@ -514,7 +519,7 @@ static void gameStateUpdate()
 
 	if (!paused && !scriptPaused())
 	{
-		updateScripts();
+		executeFnAndProcessScriptQueuedRemovals([]() { updateScripts(); });
 	}
 
 	// Update abandoned structures
@@ -543,33 +548,40 @@ static void gameStateUpdate()
 		//update the current power available for a player
 		updatePlayerPower(i);
 
-		mutating_list_iterate(apsDroidLists[i], [](DROID* d)
-		{
-			droidUpdate(d);
-			return IterationResult::CONTINUE_ITERATION;
+		executeFnAndProcessScriptQueuedRemovals([i]() {
+			mutating_list_iterate(apsDroidLists[i], [](DROID* d)
+			{
+				droidUpdate(d);
+				return IterationResult::CONTINUE_ITERATION;
+			});
 		});
-		mutating_list_iterate(mission.apsDroidLists[i], [](DROID* d)
-		{
-			missionDroidUpdate(d);
-			return IterationResult::CONTINUE_ITERATION;
+		executeFnAndProcessScriptQueuedRemovals([i]() {
+			mutating_list_iterate(mission.apsDroidLists[i], [](DROID* d)
+			{
+				missionDroidUpdate(d);
+				return IterationResult::CONTINUE_ITERATION;
+			});
 		});
-
 		// FIXME: These for-loops are code duplication
-		mutating_list_iterate(apsStructLists[i], [](STRUCTURE* s)
-		{
-			structureUpdate(s, false);
-			return IterationResult::CONTINUE_ITERATION;
+		executeFnAndProcessScriptQueuedRemovals([i]() {
+			mutating_list_iterate(apsStructLists[i], [](STRUCTURE* s)
+			{
+				structureUpdate(s, false);
+				return IterationResult::CONTINUE_ITERATION;
+			});
 		});
-		mutating_list_iterate(mission.apsStructLists[i], [](STRUCTURE* s)
-		{
-			structureUpdate(s, true); // update for mission
-			return IterationResult::CONTINUE_ITERATION;
+		executeFnAndProcessScriptQueuedRemovals([i]() {
+			mutating_list_iterate(mission.apsStructLists[i], [](STRUCTURE* s)
+			{
+				structureUpdate(s, true); // update for mission
+				return IterationResult::CONTINUE_ITERATION;
+			});
 		});
 	}
 
 	missionTimerUpdate();
 
-	proj_UpdateAll();
+	executeFnAndProcessScriptQueuedRemovals([]() { proj_UpdateAll(); });
 
 	for (FEATURE *psCFeat : apsFeatureLists[0])
 	{
@@ -603,6 +615,24 @@ void setMaxFastForwardTicks(optional<size_t> value, bool fixedToNormalTickRate)
 	fastForwardTicksFixedToNormalTickRate = fixedToNormalTickRate;
 }
 
+static int renderBudget = 0;  // Scaled time spent rendering minus scaled time spent updating.
+const Rational renderFraction(2, 5);  // Minimum fraction of time spent rendering.
+const Rational updateFraction = Rational(1) - renderFraction;
+
+#if defined(__EMSCRIPTEN__)
+unsigned lastRenderDelta = 0;
+void wz_emscripten_did_finish_render(unsigned int browserRenderDelta)
+{
+	if (GetGameMode() != GS_NORMAL)
+	{
+		return;
+	}
+	renderBudget += (lastRenderDelta + browserRenderDelta) * updateFraction.n;
+	renderBudget = std::min(renderBudget, (renderFraction * 500).floor());
+	lastRenderDelta = 0;
+}
+#endif
+
 /* The main game loop */
 GAMECODE gameLoop()
 {
@@ -610,10 +640,7 @@ GAMECODE gameLoop()
 	static uint32_t lastFlushTime = 0;
 
 	static size_t numForcedUpdatesLastCall = 0;
-	static int renderBudget = 0;  // Scaled time spent rendering minus scaled time spent updating.
 	static bool previousUpdateWasRender = false;
-	const Rational renderFraction(2, 5);  // Minimum fraction of time spent rendering.
-	const Rational updateFraction = Rational(1) - renderFraction;
 
 	// Shouldn't this be when initialising the game, rather than randomly called between ticks?
 	countUpdate(false); // kick off with correct counts
@@ -625,7 +652,7 @@ GAMECODE gameLoop()
 	{
 		// Receive NET_BLAH messages.
 		// Receive GAME_BLAH messages, and if it's time, process exactly as many GAME_BLAH messages as required to be able to tick the gameTime.
-		recvMessage();
+		executeFnAndProcessScriptQueuedRemovals([]() { recvMessage(); });
 
 		bool selectedPlayerIsSpectator = bMultiPlayer && NetPlay.players[selectedPlayer].isSpectator;
 		bool multiplayerHostDisconnected = bMultiPlayer && !NetPlay.isHostAlive && NetPlay.bComms && !NetPlay.isHost; // do not fast-forward after the host has disconnected
@@ -678,13 +705,23 @@ GAMECODE gameLoop()
 		NETflush();  // Make sure that we aren't waiting too long to send data.
 	}
 
-	unsigned before = wzGetTicks();
-	GAMECODE renderReturn = renderLoop();
-	pie_ScreenFrameRenderEnd(); // must happen here for proper renderBudget calculation
-	unsigned after = wzGetTicks();
+	unsigned before, after;
+	GAMECODE renderReturn;
+	executeFnAndProcessScriptQueuedRemovals([&before, &after, &renderReturn]()
+	{
+		before = wzGetTicks();
+		renderReturn = renderLoop();
+		pie_ScreenFrameRenderEnd(); // must happen here for proper renderBudget calculation
+		after = wzGetTicks();
+	});
 
+
+#if defined(__EMSCRIPTEN__)
+	lastRenderDelta = (after - before);
+#else
 	renderBudget += (after - before) * updateFraction.n;
 	renderBudget = std::min(renderBudget, (renderFraction * 500).floor());
+#endif
 	previousUpdateWasRender = true;
 
 	if (headlessGameMode() && autogame_enabled())
@@ -717,8 +754,9 @@ void videoLoop()
 		seq_StopFullScreenVideo();
 
 		//set the next video off - if any
-		if (videoFinished && seq_AnySeqLeft())
+		if (seq_AnySeqLeft())
 		{
+			skipCounter = 0;
 			seq_StartNextFullScreenVideo();
 		}
 		else
@@ -733,7 +771,7 @@ void videoLoop()
 			{
 				displayGameOver(getScriptWinLoseVideo() == PLAY_WIN, false);
 			}
-			triggerEvent(TRIGGER_VIDEO_QUIT);
+			executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_VIDEO_QUIT); });
 		}
 	}
 }

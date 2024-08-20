@@ -50,6 +50,7 @@ class W_SLIDER;
 class StateButton;
 class ListWidget;
 class ScrollBarWidget;
+struct WIDGET_KEYSTATE;
 
 /* The display function prototype */
 typedef void (*WIDGET_DISPLAY)(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
@@ -70,7 +71,7 @@ typedef std::function<void (WIDGET *psWidget)> WIDGET_CALCLAYOUT_FUNC;
 typedef std::function<void (WIDGET *psWidget)> WIDGET_ONDELETE_FUNC;
 
 /* The optional hit-testing function, used for custom hit-testing within the outer bounding rectangle */
-typedef std::function<bool (WIDGET *psWidget, int x, int y)> WIDGET_HITTEST_FUNC;
+typedef std::function<bool (const WIDGET *psWidget, int x, int y)> WIDGET_HITTEST_FUNC;
 
 
 /* The different base types of widget */
@@ -115,6 +116,7 @@ private:
 	Vector2i offset = {0, 0};
 	WzRect clipRect = {0, 0, 0, 0};
 	bool clipped = false;
+	bool allowChildDisplayIfSelfClipped = false;
 
 public:
 	int32_t getXOffset() const
@@ -127,11 +129,18 @@ public:
 		return offset.y;
 	}
 
+	bool allowChildDisplayRecursiveIfSelfClipped() const
+	{
+		return allowChildDisplayIfSelfClipped;
+	}
+
 	bool clipContains(WzRect const& rect) const;
 
 	WidgetGraphicsContext translatedBy(int32_t x, int32_t y) const;
 
 	WidgetGraphicsContext clippedBy(WzRect const &newRect) const;
+
+	WidgetGraphicsContext setAllowChildDisplayRecursiveIfSelfClipped(bool val) const;
 };
 
 struct WidgetHelp
@@ -218,7 +227,11 @@ protected:
 	virtual void display(int, int) {}
 	virtual void geometryChanged() {}
 
-	virtual bool hitTest(int x, int y);
+	virtual bool hitTest(int x, int y) const;
+
+	// handling mouse drag
+	virtual bool capturesMouseDrag(WIDGET_KEY) { return false; }
+	virtual void mouseDragged(WIDGET_KEY, W_CONTEXT *start, W_CONTEXT *current) {}
 
 public:
 	virtual unsigned getState();
@@ -341,7 +354,12 @@ public:
 	void setGeometry(WzRect const &r);
 	virtual void setGeometryFromScreenRect(WzRect const &r);
 
-	void attach(const std::shared_ptr<WIDGET> &widget);
+	enum class ChildZPos {
+		Front,
+		Back
+	};
+
+	void attach(const std::shared_ptr<WIDGET> &widget, ChildZPos zPos = ChildZPos::Front);
 	/**
 	 * @deprecated use `void WIDGET::attach(const std::shared_ptr<WIDGET> &widget)` instead
 	 **/
@@ -404,6 +422,7 @@ public:
 		WidgetGraphicsContext context;
 		displayRecursive(context);
 	}
+	static void processMouseDragEvent(const W_CONTEXT &sContext, WIDGET_KEY wkey, WIDGET_KEYSTATE* pState, bool alsoTriggerReleased);
 
 private:
 	std::weak_ptr<WIDGET> parentWidget;
@@ -512,6 +531,21 @@ public:
 		*this = *other;
 	}
 	W_CONTEXT& operator=(const W_CONTEXT& other) = default;
+	inline bool operator== (const W_CONTEXT &b) const
+	{
+		return (xOffset == b.xOffset && yOffset == b.yOffset
+				&& mx == b.mx && my == b.my);
+	}
+public:
+	inline W_CONTEXT convertToScreenContext()
+	{
+		W_CONTEXT screenContext(*this);
+		screenContext.mx += screenContext.xOffset;
+		screenContext.my += screenContext.yOffset;
+		screenContext.xOffset = 0;
+		screenContext.yOffset = 0;
+		return screenContext;
+	}
 };
 
 #endif // __INCLUDED_LIB_WIDGET_WIDGBASE_H__

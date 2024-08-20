@@ -22,6 +22,8 @@
 #include "lib/framework/frame.h"
 #include "lib/framework/math_ext.h"
 #include "lib/framework/wztime.h"
+#include "lib/sound/audio.h"
+#include "lib/sound/audio_id.h"
 #include "quickchat.h"
 #include "teamstrategy.h"
 #include "lib/widget/widgint.h"
@@ -272,7 +274,7 @@ public:
 		lastWidgetWidth = width();
 
 		int textX0 = xPos + QuickChatButtonHorizontalPadding;
-		int textY0 = yPos + (h - wzMessageText.lineSize()) / 2 - float(wzMessageText.aboveBase());
+		int textY0 = static_cast<int>(yPos + (h - wzMessageText.lineSize()) / 2 - float(wzMessageText.aboveBase()));
 
 		int maxTextDisplayableWidth = w - (QuickChatButtonHorizontalPadding * 2);
 		isTruncated = maxTextDisplayableWidth < wzMessageText.width();
@@ -3060,10 +3062,12 @@ bool recvQuickChat(NETQUEUE queue)
 		if (isInGame)
 		{
 			addQuickChatMessageToConsole(msgEnumVal, sender, targeting);
+			audio_PlayTrack(ID_SOUND_MESSAGEEND);
 		}
 		else
 		{
 			addLobbyQuickChatMessageToConsole(msgEnumVal, sender, targeting);
+			audio_PlayTrack(FE_AUDIO_MESSAGEEND);
 		}
 	}
 	else

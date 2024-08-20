@@ -268,6 +268,8 @@ extern iIMDShape	*pNewDesignIMD;
 /* Initialise the in game interface */
 bool intInitialise();
 
+bool intAddRadarWidget();
+
 // Check of coordinate is in the build menu
 bool CoordInBuild(int x, int y);
 
@@ -301,6 +303,7 @@ void intRemoveReticule();
 void setReticuleStats(int ButId, std::string tip = std::string(), std::string filename = std::string(), std::string filenameDown = std::string(), const playerCallbackFunc& callbackFunc = nullptr);
 void setReticulesEnabled(bool enabled);
 void setReticuleFlash(int ButId, bool flash);
+optional<std::string> getReticuleButtonDisplayFilename(int ButId);
 
 /* Set the map view point to the world coordinates x,y */
 void intSetMapPos(UDWORD x, UDWORD y);

@@ -62,7 +62,6 @@ static size_t currRadarGfx = 0;
  */
 /***************************************************************************/
 
-static bool assertValidImage(IMAGEFILE *imageFile, unsigned id);
 static Vector2i makePieImage(IMAGEFILE *imageFile, unsigned id, PIERECT *dest = nullptr, int x = 0, int y = 0);
 
 /***************************************************************************/
@@ -548,7 +547,7 @@ void pie_UniTransBoxFill(float x0, float y0, float x1, float y1, PIELIGHT light)
 
 /***************************************************************************/
 
-static bool assertValidImage(IMAGEFILE *imageFile, unsigned id)
+bool assertValidImage(IMAGEFILE *imageFile, unsigned id)
 {
 	ASSERT_OR_RETURN(false, imageFile != nullptr, "Null imageFile (id: %u)", id);
 	ASSERT_OR_RETURN(false, id < imageFile->imageDefs.size(), "Out of range 1: %u/%d", id, (int)imageFile->imageDefs.size());
@@ -627,7 +626,7 @@ static void pie_DrawMultipleImages(const std::list<PieDrawImageRequest>& request
 
 	bool didEnableRect = false;
 	gfx_api::DrawImagePSO::get().bind();
-	
+
 	for (auto& request : requests)
 	{
 		// The following is the equivalent of:
@@ -776,7 +775,7 @@ void iV_DrawImageTint(IMAGEFILE *ImageFile, UWORD ID, float x, float y, PIELIGHT
 	}
 }
 
-void iV_DrawImageFileAnisotropic(IMAGEFILE *ImageFile, UWORD ID, int x, int y, Vector2f size, const glm::mat4 &modelViewProjection, uint8_t alpha)
+void iV_DrawImageFileAnisotropicTint(IMAGEFILE *ImageFile, UWORD ID, int x, int y, Vector2f size, PIELIGHT color, const glm::mat4 &modelViewProjection)
 {
 	if (!assertValidImage(ImageFile, ID))
 	{
@@ -789,7 +788,12 @@ void iV_DrawImageFileAnisotropic(IMAGEFILE *ImageFile, UWORD ID, int x, int y, V
 	dest.h = size.y;
 
 	gfx_api::DrawImageAnisotropicPSO::get().bind();
-	pie_DrawImageTemplate<gfx_api::DrawImageAnisotropicPSO>(ImageFile, ID, pieImage, &dest, pal_RGBA(255, 255, 255, alpha), modelViewProjection);
+	pie_DrawImageTemplate<gfx_api::DrawImageAnisotropicPSO>(ImageFile, ID, pieImage, &dest, color, modelViewProjection);
+}
+
+void iV_DrawImageFileAnisotropic(IMAGEFILE *ImageFile, UWORD ID, int x, int y, Vector2f size, const glm::mat4 &modelViewProjection, uint8_t alpha)
+{
+	iV_DrawImageFileAnisotropicTint(ImageFile, ID, x, y, size, pal_RGBA(255, 255, 255, alpha), modelViewProjection);
 }
 
 void iV_DrawImageTc(AtlasImage image, AtlasImage imageTc, int x, int y, PIELIGHT colour, const glm::mat4 &modelViewProjection)

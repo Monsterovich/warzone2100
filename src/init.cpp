@@ -48,6 +48,7 @@
 #include "input/manager.h"
 #include "advvis.h"
 #include "atmos.h"
+#include "campaigninfo.h"
 #include "challenge.h"
 #include "cmddroid.h"
 #include "configuration.h"
@@ -58,6 +59,7 @@
 #include "display3d.h"
 #include "edit3d.h"
 #include "effects.h"
+#include "formation.h"
 #include "fpath.h"
 #include "frend.h"
 #include "frontend.h"
@@ -98,6 +100,8 @@
 #include "seqdisp.h"
 #include "version.h"
 #include "hci/teamstrategy.h"
+#include "screens/guidescreen.h"
+#include "wzapi.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -137,16 +141,6 @@ typedef std::string MapName;
 typedef std::unordered_map<MapName, WZmapInfo> WZMapInfo_Map;
 WZMapInfo_Map WZ_Maps;
 
-enum MODS_PATHS: size_t
-{
-	MODS_MUSIC,
-	MODS_GLOBAL,
-	MODS_AUTOLOAD,
-	MODS_CAMPAIGN,
-	MODS_MULTIPLAY,
-	MODS_PATHS_MAX
-};
-
 static std::string getFullModPath(MODS_PATHS type)
 {
 	switch (type)
@@ -158,7 +152,8 @@ static std::string getFullModPath(MODS_PATHS type)
 		case MODS_AUTOLOAD:
 			return version_getVersionedModsFolderPath("autoload");
 		case MODS_CAMPAIGN:
-			return version_getVersionedModsFolderPath("campaign");
+			// With the new campaign mod packaging format, we no longer need a versioned path (as the mods contain version compatibility info)
+			return "mods/campaign";
 		case MODS_MULTIPLAY:
 			return version_getVersionedModsFolderPath("multiplay");
 		case MODS_PATHS_MAX:
@@ -177,7 +172,7 @@ static std::array<std::string, MODS_PATHS_MAX> buildFullModsPaths()
 	return result;
 }
 
-static const char* versionedModsPath(MODS_PATHS type)
+const char* versionedModsPath(MODS_PATHS type)
 {
 	static std::array<std::string, MODS_PATHS_MAX> cachedFullModsPaths = buildFullModsPaths();
 	return cachedFullModsPaths[type].c_str();
@@ -599,7 +594,7 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map,
 		}
 
 		current_mode = mode;
-		lastCommand.mode = mode; // store this separately, so it doesn't get overridden with mod_override below
+		lastCommand.mode = mode; // store this separately, so it doesn't get overridden by anything below
 		lastCommand.force = force;
 		lastCommand.current_map.reset();
 		if (current_map != nullptr)
@@ -811,8 +806,6 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map,
 			{
 				debug(LOG_POPUP, _("The required mod could not be loaded: %s\n\nWarzone will try to load the game without it."), override_mod_list.c_str());
 			}
-			clearOverrideMods();
-			current_mode = mod_override;
 		}
 
 		// User's home dir must be first so we always see what we write
@@ -837,11 +830,6 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map,
 		}
 
 		ActivityManager::instance().rebuiltSearchPath();
-	}
-	else if (use_override_mods)
-	{
-		// override mods are already the same as current mods, so no need to do anything
-		clearOverrideMods();
 	}
 	return true;
 }
@@ -1014,22 +1002,19 @@ static inline optional<WZmapInfo> CheckInMap(const char *archive, const std::str
 			lookin.append("/");
 			lookin.append(lookin_subdir);
 		}
-		bool enumResult = WZ_PHYSFS_enumerateFiles(lookin.c_str(), [&](const char *file) -> bool {
+		bool enumResult = WZ_PHYSFS_enumerateFolders(lookin, [&](const char *file) -> bool {
 			std::string checkfile = file;
-			if (WZ_PHYSFS_isDirectory((lookin + "/" + checkfile).c_str()))
+			if (checkfile.compare("wrf") == 0 || checkfile.compare("stats") == 0 || checkfile.compare("components") == 0
+				|| checkfile.compare("effects") == 0 || checkfile.compare("messages") == 0
+				|| checkfile.compare("audio") == 0 || checkfile.compare("sequenceaudio") == 0 || checkfile.compare("misc") == 0
+				|| checkfile.compare("features") == 0 || checkfile.compare("script") == 0 || checkfile.compare("structs") == 0
+				|| checkfile.compare("tileset") == 0 || checkfile.compare("images") == 0 || checkfile.compare("texpages") == 0
+				|| checkfile.compare("skirmish") == 0 || checkfile.compare("shaders") == 0 || checkfile.compare("fonts") == 0
+				|| checkfile.compare("icons") == 0)
 			{
-				if (checkfile.compare("wrf") == 0 || checkfile.compare("stats") == 0 || checkfile.compare("components") == 0
-					|| checkfile.compare("effects") == 0 || checkfile.compare("messages") == 0
-					|| checkfile.compare("audio") == 0 || checkfile.compare("sequenceaudio") == 0 || checkfile.compare("misc") == 0
-					|| checkfile.compare("features") == 0 || checkfile.compare("script") == 0 || checkfile.compare("structs") == 0
-					|| checkfile.compare("tileset") == 0 || checkfile.compare("images") == 0 || checkfile.compare("texpages") == 0
-					|| checkfile.compare("skirmish") == 0 || checkfile.compare("shaders") == 0 || checkfile.compare("fonts") == 0
-					|| checkfile.compare("icons") == 0)
-				{
-					debug(LOG_WZ, "Detected: %s %s" , archive, checkfile.c_str());
-					mapmod = true;
-					return false; // break;
-				}
+				debug(LOG_WZ, "Detected: %s %s" , archive, checkfile.c_str());
+				mapmod = true;
+				return false; // break;
 			}
 			return true; // continue
 		});
@@ -1209,18 +1194,25 @@ bool setSpecialInMemoryMap(std::vector<uint8_t>&& mapArchiveData)
 }
 #endif
 
-bool buildMapList()
+bool buildMapList(bool campaignOnly)
 {
 	if (!loadLevFile("gamedesc.lev", mod_campaign, false, nullptr))
 	{
 		return false;
 	}
-	loadLevFile("addon.lev", mod_multiplay, false, nullptr);
+	if (!campaignOnly)
+	{
+		loadLevFile("addon.lev", mod_multiplay, false, nullptr);
+	}
 	WZ_Maps.clear();
 	if (!inMemoryMapArchiveMounted && !inMemoryMapArchiveData.empty())
 	{
 		debug(LOG_INFO, "Clearing in-memory map archive (since it isn't currently loaded)");
 		clearInMemoryMapFile(inMemoryMapArchiveData.data());
+	}
+	if (campaignOnly)
+	{
+		return true;
 	}
 	MapFileList realFileNames = listMapFiles();
 	for (auto &realFileName : realFileNames)
@@ -1348,7 +1340,7 @@ void systemShutdown()
 	debug(LOG_MAIN, "shutting down CD audio");
 	cdAudio_Close();
 
-	if (audio_Disabled() == false && !audio_Shutdown())
+	if (!audio_Disabled() && !audio_Shutdown())
 	{
 		debug(LOG_FATAL, "Unable to audio_Shutdown() cleanly!");
 		abort();
@@ -1475,6 +1467,7 @@ bool frontendShutdown()
 		closeLoadSaveOnShutdown(); // TODO: Ideally this would not be required here (refactor loadsave.cpp / frontend.cpp?)
 	}
 	interfaceShutDown();
+	shutdownGameGuide();
 
 	//do this before shutting down the iV library
 	resReleaseAllData();
@@ -1550,6 +1543,11 @@ bool stageOneInitialise()
 		return false;
 	}
 
+	if (!formationInitialise())		// Initialise the formation system
+	{
+		return false;
+	}
+
 	// initialise the visibility stuff
 	if (!visInitialise())
 	{
@@ -1592,10 +1590,12 @@ bool stageOneShutDown()
 
 	pie_FreeShaders();
 
-	if (audio_Disabled() == false)
+	if (!audio_Disabled())
 	{
 		sound_CheckAllUnloaded();
 	}
+
+	shutdownGameGuide();
 
 	proj_Shutdown();
 
@@ -1612,6 +1612,8 @@ bool stageOneShutDown()
 	}
 
 	grpShutDown();
+
+	formationShutDown();
 
 	ResearchRelease();
 
@@ -1631,8 +1633,26 @@ bool stageOneShutDown()
 	modelShutdown();
 	pie_TexShutDown();
 
+	bool needsLevReload = (hasOverrideMods() || hasCampaignMods()) && (game.type == LEVEL_TYPE::CAMPAIGN);
+	clearOverrideMods();
+	clearCampaignMods();
+	clearCamTweakOptions();
+
 	// Use mod_multiplay as the default (campaign might have set it to mod_singleplayer)
 	rebuildSearchPath(mod_multiplay, true);
+
+	if (needsLevReload)
+	{
+		// Clear & reload level list
+		levShutDown();
+		levInitialise();
+		pal_Init(); // Update palettes.
+		if (!buildMapList(false))
+		{
+			debug(LOG_FATAL, "Failed to rebuild map / level list?");
+		}
+	}
+
 	pie_TexInit(); // restart it
 
 	initMiscVars();
@@ -1728,7 +1748,7 @@ bool stageTwoInitialise()
 		{
 			NETinitQueue(NETgameQueue(i));
 
-			if (!myResponsibility(i))
+			if (!myResponsibility(i) || !NetPlay.bComms)
 			{
 				NETsetNoSendOverNetwork(NETgameQueue(i));
 			}
@@ -1778,12 +1798,6 @@ bool stageTwoShutDown()
 		return false;
 	}
 
-
-	if (!ShutdownRadar())
-	{
-		return false;
-	}
-
 	interfaceShutDown();
 
 	cmdDroidShutDown();
@@ -1796,7 +1810,59 @@ bool stageTwoShutDown()
 		return false;
 	}
 
+	clearCampaignName();
+
 	return true;
+}
+
+static void displayLoadingErrors()
+{
+	std::vector<std::string> loadingErrors;
+
+	// warn the user if a mod might have corrupted models / files
+	auto modelLoadingErrorCount = getModelLoadingErrorCount();
+	if (modelLoadingErrorCount > 0)
+	{
+		debug(LOG_INFO, "Failure to load %zu game model(s) - please remove any outdated or broken mods", modelLoadingErrorCount);
+		loadingErrors.push_back(astringf(_("Failure to load %zu game model(s)"), modelLoadingErrorCount));
+	}
+	auto modelTextureLoadingFailures = getModelTextureLoadingFailuresCount();
+	if (modelTextureLoadingFailures > 0)
+	{
+		debug(LOG_INFO, "Failed to load textures for %zu models - please remove any outdated or broken mods", modelTextureLoadingFailures);
+		loadingErrors.push_back(astringf(_("Failure to load textures for %zu model(s)"), modelTextureLoadingFailures));
+	}
+	auto statModelLoadingFailures = getStatModelLoadingFailures();
+	if (statModelLoadingFailures > 0)
+	{
+		debug(LOG_INFO, "Failed to load model for %zu stats entries - please remove any outdated or broken mods", statModelLoadingFailures);
+		loadingErrors.push_back(astringf(_("Failure to load model for %zu stat(s)"), statModelLoadingFailures));
+	}
+
+	if (!loadingErrors.empty())
+	{
+		std::string modelErrorDescription = _("Warzone 2100 encountered error(s) loading game data:");
+		for (const auto& error : loadingErrors)
+		{
+			modelErrorDescription += "\n";
+			modelErrorDescription += "- ";
+			modelErrorDescription += error;
+		}
+		modelErrorDescription += "\n\n";
+		if (!getLoadedMods().empty())
+		{
+			modelErrorDescription += _("Please try removing any new mods - they may have issues or be incompatible with this version.");
+			modelErrorDescription += "\n\n";
+			modelErrorDescription += _("Loaded mod(s):");
+			modelErrorDescription += "\n";
+			modelErrorDescription += std::string("- ") + getModList();
+		}
+		else
+		{
+			modelErrorDescription += _("Base game files may be corrupt or outdated - please try reinstalling the game.");
+		}
+		wzDisplayDialog(Dialog_Error, _("Error Loading Game Data"), modelErrorDescription.c_str());
+	}
 }
 
 bool stageThreeInitialise()
@@ -1879,6 +1945,8 @@ bool stageThreeInitialise()
 		challengeActive = true;
 	}
 
+	// add radar to interface screen, and resize
+	intAddRadarWidget();
 	resizeRadar();
 
 	setAllPauseStates(false);
@@ -1887,7 +1955,7 @@ bool stageThreeInitialise()
 
 	if (getLevelLoadType() == GTYPE_SAVE_MIDMISSION || getLevelLoadType() == GTYPE_SAVE_START)
 	{
-		triggerEvent(TRIGGER_GAME_LOADED);
+		executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_GAME_LOADED); });
 	}
 	else
 	{
@@ -1896,10 +1964,12 @@ bool stageThreeInitialise()
 		const DebugInputManager& dbgInputManager = gInputManager.debugManager();
 		if (dbgInputManager.debugMappingsAllowed())
 		{
+			Cheated = true;
 			triggerEventCheatMode(true);
+			gInputManager.contexts().set(InputContext::DEBUG_MISC, InputContext::State::ACTIVE);
 		}
 
-		triggerEvent(TRIGGER_GAME_INIT);
+		executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_GAME_INIT); });
 		playerBuiltHQ = structureExists(selectedPlayer, REF_HQ, true, false);
 	}
 
@@ -1908,6 +1978,9 @@ bool stageThreeInitialise()
 
 	// always start off with a refresh of the groups UI data
 	intGroupsChanged();
+
+	// warn the user if a mod might have corrupted models / files
+	displayLoadingErrors();
 
 	if (bMultiPlayer)
 	{
@@ -1952,6 +2025,11 @@ bool stageThreeShutDown()
 
 	// make sure any button tips are gone.
 	widgReset();
+
+	if (!ShutdownRadar())
+	{
+		debug(LOG_FATAL, "Failed to shutdown radar");
+	}
 
 	audio_StopAll();
 

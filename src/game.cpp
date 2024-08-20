@@ -68,11 +68,14 @@
 #include "effects.h"
 #include "init.h"
 #include "mission.h"
+#include "campaigninfo.h"
 #include "scores.h"
 #include "design.h"
 #include "component.h"
 #include "radar.h"
 #include "cmddroid.h"
+#include "formationdef.h"
+#include "formation.h"
 #include "warzoneconfig.h"
 #include "multiplay.h"
 #include "frontend.h"
@@ -94,7 +97,8 @@
 #include "multigifts.h"
 #include "wzscriptdebug.h"
 #include "gamehistorylogger.h"
-#include "build_tools/autorevision.h"
+#include "wzapi.h"
+#include "screens/guidescreen.h"
 #include <array>
 
 #if defined(__clang__)
@@ -113,6 +117,10 @@
 # pragma clang diagnostic ignored "-Wunused-function"
 #elif defined(__GNUC__)
 # pragma GCC diagnostic ignored "-Wunused-function"
+#endif
+
+#if defined(__EMSCRIPTEN__)
+# include "emscripten_helpers.h"
 #endif
 
 bool saveJSONToFile(const nlohmann::json& obj, const char* pFileName)
@@ -1228,7 +1236,7 @@ static void deserializeSaveGameV16Data_json(const nlohmann::json &o, SAVE_GAME_V
 {
 	deserializeSaveGameV15Data_json(o, (SAVE_GAME_V15 *) serializeGame);
 	for (unsigned i = 0; i < MAX_NOGO_AREAS; ++i)
-	{		
+	{
 		deserializeLandingZoneData_json(o.at("landingZones").at(i), &serializeGame->sLandingZone[i]);
 	}
 }
@@ -1540,7 +1548,7 @@ static void deserializeSaveGameV22Data_json(const nlohmann::json &o, SAVE_GAME_V
 		const nlohmann::json runData = o.at("runData");
 		ASSERT_OR_RETURN(, runData.is_array(), "unexpected type, wanted array");
 		deserializeRunData_json(runData.at(i), &serializeGame->asRunData[i]);
-		
+
 	}
 }
 
@@ -1976,7 +1984,7 @@ static bool serializeSaveGameV38Data(PHYSFS_file *fileHandle, const SAVE_GAME_V3
 	{
 		return false;
 	}
-	
+
 	if (WZ_PHYSFS_writeBytes(fileHandle, serializeGame->modList, modlist_string_size) != modlist_string_size)
 	{
 		return false;
@@ -2013,7 +2021,7 @@ static void serializeSaveGameData_json(nlohmann::json &o, nlohmann::json &savein
 	serializeSaveGameV38Data_json(o, (const SAVE_GAME_V38 *) serializeGame);
 	// not sure whether its 38, 39 or 40... different .cpp files are using different numbers
 	o["version"] = VERSION_39;
-	
+
 	// This file lists saved games, and their build info
 	// one per savegame directory
 	const auto tagResult = version_extractVersionNumberFromTag(version_getLatestTag());
@@ -2025,7 +2033,7 @@ static void serializeSaveGameData_json(nlohmann::json &o, nlohmann::json &savein
 	if (saveinfo.contains(saveName))
 	{
 		saveinfo.erase(saveName);
-	}	
+	}
 	char ourtime[20];
 	const time_t curtime = time(nullptr);
 	struct tm timeinfo = getLocalTime(curtime);
@@ -2048,7 +2056,7 @@ static bool deserializeSaveGameData_json(const nlohmann::json &o, SAVE_GAME *ser
 		debug(LOG_ERROR, "%s", e.what());
 		return false;
 	}
-	
+
 }
 static bool deserializeSaveGameData(PHYSFS_file *fileHandle, SAVE_GAME *serializeGame)
 {
@@ -2224,7 +2232,11 @@ static bool writeMapFile(const char *fileName);
 
 static bool loadWzMapDroidInit(WzMap::Map &wzMap, std::unordered_map<UDWORD, UDWORD>& fixedMapIdToGeneratedId);
 
-static bool loadSaveDroid(const char *pFileName, PerPlayerDroidLists& ppsCurrentDroidLists);
+// `nextFreeGroupID` acts as the initial offset for assigning new group IDs in `loadSaveGroup()`.
+// This number is passed by reference and is intended to be used a single counter throughout multiple
+// invocations of `loadSaveDroid()` (for each available droid list), so that group mappings stay consistent
+// across all droid lists.
+static bool loadSaveDroid(const char *pFileName, PerPlayerDroidLists& ppsCurrentDroidLists, int& nextFreeGroupID);
 static bool loadSaveDroidPointers(const WzString &pFileName, PerPlayerDroidLists* ppsCurrentDroidLists);
 static bool writeDroidFile(const char *pFileName, const PerPlayerDroidLists& ppsCurrentDroidLists);
 
@@ -2263,6 +2275,9 @@ static bool readFiresupportDesignators(const char *pFileName);
 static bool writeFiresupportDesignators(const char *pFileName);
 
 static bool writeScriptState(const char *pFileName);
+
+static bool writeSaveGuideTopics(const char *pFileName);
+static bool loadSaveGuideTopics(const char *pFileName);
 
 static bool gameLoad(const char *fileName);
 
@@ -2398,7 +2413,7 @@ static void getIniDroidOrder(WzConfig &ini, WzString const &key, DroidOrder &ord
 
 static void setIniBaseObject(nlohmann::json &json, WzString const &key, BASE_OBJECT const *object)
 {
-	if (object != nullptr && object->died <= 1)
+	if (object != nullptr && object->died <= NOT_CURRENT_LIST)
 	{
 		const auto& keyStr = key.toStdString();
 		json[keyStr + "/id"] = object->id;
@@ -2504,6 +2519,13 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 	UWORD           missionScrollMinX = 0, missionScrollMinY = 0,
 	                missionScrollMaxX = 0, missionScrollMaxY = 0;
 	uint32_t        mapSeed = 0;
+	// This will be set to the largest group ID found throughout each droid file + 1
+	// on each invocation of `loadSaveDroid()` function.
+	// Acts as the initial offset for assigning new group IDs in `loadSaveGroup()`.
+	//
+	// It helps to allocate non-conflicting group IDs for commanders which
+	// happen to lose their group, e.g. when transitioning from an offworld mission.
+	int nextFreeGroupID = 0;
 
 	/* Stop the game clock */
 	gameTimeStop();
@@ -2806,6 +2828,19 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 		}
 	}
 
+	//if user save game then load up the research BEFORE any droids or structures are loaded
+	if (gameType == GTYPE_SAVE_START || gameType == GTYPE_SAVE_MIDMISSION)
+	{
+		//load in the research list file
+		aFileName[fileExten] = '\0';
+		strcat(aFileName, "resstate.json");
+		if (!loadSaveResearch(aFileName))
+		{
+			debug(LOG_ERROR, "Failed to load research data from %s", aFileName);
+			goto error;
+		}
+	}
+
 	if (saveGameOnMission && UserSaveGame)
 	{
 		//the scroll limits for the mission map have already been written
@@ -2894,7 +2929,7 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 		// load in the mission droids, if any
 		aFileName[fileExten] = '\0';
 		strcat(aFileName, "mdroid.json");
-		if (loadSaveDroid(aFileName, apsDroidLists))
+		if (loadSaveDroid(aFileName, apsDroidLists, nextFreeGroupID))
 		{
 			droidMap[aFileName] = &mission.apsDroidLists; // need to swap here to read correct list later
 		}
@@ -3006,19 +3041,6 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 	//adjust the scroll range for the new map or the expanded map
 	setMapScroll();
 
-	//if user save game then load up the research BEFORE any droids or structures are loaded
-	if (gameType == GTYPE_SAVE_START || gameType == GTYPE_SAVE_MIDMISSION)
-	{
-		//load in the research list file
-		aFileName[fileExten] = '\0';
-		strcat(aFileName, "resstate.json");
-		if (!loadSaveResearch(aFileName))
-		{
-			debug(LOG_ERROR, "Failed to load research data from %s", aFileName);
-			goto error;
-		}
-	}
-
 	if (IsScenario)
 	{
 		//load in the droids
@@ -3043,7 +3065,7 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 		}
 		else
 		{
-			if (loadSaveDroid(aFileName, apsDroidLists))
+			if (loadSaveDroid(aFileName, apsDroidLists, nextFreeGroupID))
 			{
 				debug(LOG_SAVE, "Loaded new style droids");
 				droidMap[aFileName] = &apsDroidLists;	// load pointers later
@@ -3057,7 +3079,7 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 		strcat(aFileName, "droid.json");
 
 		//load the data into apsDroidLists
-		if (!loadSaveDroid(aFileName, apsDroidLists))
+		if (!loadSaveDroid(aFileName, apsDroidLists, nextFreeGroupID))
 		{
 			debug(LOG_ERROR, "failed to load %s", aFileName);
 			goto error;
@@ -3088,7 +3110,7 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 			strcat(aFileName, "mdroid.json");
 
 			// load the data into mission.apsDroidLists, if any
-			if (loadSaveDroid(aFileName, mission.apsDroidLists))
+			if (loadSaveDroid(aFileName, mission.apsDroidLists, nextFreeGroupID))
 			{
 				droidMap[aFileName] = &mission.apsDroidLists;
 			}
@@ -3100,7 +3122,7 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 		// load in the limbo droids, if any
 		aFileName[fileExten] = '\0';
 		strcat(aFileName, "limbo.json");
-		if (loadSaveDroid(aFileName, apsLimboDroids))
+		if (loadSaveDroid(aFileName, apsLimboDroids, nextFreeGroupID))
 		{
 			droidMap[aFileName] = &apsLimboDroids;
 		}
@@ -3178,6 +3200,15 @@ bool loadGame(const char *pGameToLoad, bool keepObjects, bool freeMem, bool User
 		{
 			debug(LOG_ERROR, "failed to load %s", aFileName);
 			goto error;
+		}
+
+		// load in the game guide topics
+		aFileName[fileExten] = '\0';
+		strcat(aFileName, "guidetopics.json");
+		if (!loadSaveGuideTopics(aFileName))
+		{
+			debug(LOG_ERROR, "failed to load %s", aFileName);
+			// currently not fatal if this fails
 		}
 	}
 
@@ -3359,12 +3390,12 @@ error:
 }
 // -----------------------------------------------------------------------------------------
 
-bool saveGame(const char *aFileName, GAME_TYPE saveType)
+bool saveGame(const char *aFileName, GAME_TYPE saveType, bool isAutoSave)
 {
 	size_t			fileExtension;
 	char			CurrentFileName[PATH_MAX] = {'\0'};
 
-	triggerEvent(TRIGGER_GAME_SAVING);
+	executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_GAME_SAVING); });
 
 	ASSERT_OR_RETURN(false, aFileName && strlen(aFileName) > 4, "Bad savegame filename");
 	sstrcpy(CurrentFileName, aFileName);
@@ -3557,6 +3588,11 @@ bool saveGame(const char *aFileName, GAME_TYPE saveType)
 		}
 	}
 
+	// save the loaded guide topics
+	CurrentFileName[fileExtension] = '\0';
+	strcat(CurrentFileName, "guidetopics.json");
+	writeSaveGuideTopics(CurrentFileName);
+
 	//create the droids filename
 	CurrentFileName[fileExtension] = '\0';
 	strcat(CurrentFileName, "mdroid.json");
@@ -3644,6 +3680,10 @@ bool saveGame(const char *aFileName, GAME_TYPE saveType)
 
 	// strip the last filename
 	CurrentFileName[fileExtension - 1] = '\0';
+
+#if defined(__EMSCRIPTEN__)
+	WZ_EmscriptenSyncPersistFSChanges(!isAutoSave); // NOTE: Will block main loop iterations until it finishes (asynchronously)
+#endif
 
 	/* Start the game clock */
 	triggerEvent(TRIGGER_GAME_SAVED);
@@ -3925,137 +3965,6 @@ static void endian_SaveGameV(SAVE_GAME *psSaveGame, UDWORD version)
 }
 
 // -----------------------------------------------------------------------------------------
-// Get campaign number stuff is not needed in this form on the PSX (thank you very much)
-static UDWORD getCampaignV(PHYSFS_file *fileHandle, unsigned int version, nonstd::optional<nlohmann::json> &gamJson)
-{
-	SAVE_GAME_V14 saveGame;
-
-	debug(LOG_SAVE, "getCampaignV: version = %u", version);
-
-	if (version < VERSION_14)
-	{
-		return 0;
-	}
-	// We only need VERSION 12 data (saveGame.saveKey)
-	else if (version <= VERSION_34)
-	{
-		if (WZ_PHYSFS_readBytes(fileHandle, &saveGame, sizeof(SAVE_GAME_V14)) != sizeof(SAVE_GAME_V14))
-		{
-			debug(LOG_ERROR, "getCampaignV: error while reading file: %s", WZ_PHYSFS_getLastError());
-
-			return 0;
-		}
-
-		// Convert from little-endian to native byte-order
-		endian_SaveGameV((SAVE_GAME *)&saveGame, VERSION_14);
-	}
-	else
- 	if (version <= CURRENT_VERSION_NUM)
-	{
-		if (gamJson.has_value())
-		{
-			debug(LOG_SAVEGAME, "loading campaign from gam json");
-			deserializeSaveGameV14Data_json(gamJson.value(), &saveGame);
-		}
-		else
-		{
-			if (!deserializeSaveGameV14Data(fileHandle, &saveGame))
-			{
-				debug(LOG_ERROR, "getCampaignV: error while reading file: %s", WZ_PHYSFS_getLastError());
-
-				return 0;
-			}
-		}
-	}
-	else
-	{
-		debug(LOG_ERROR, "Bad savegame version %u", version);
-		return 0;
-	}
-
-	return saveGame.saveKey & (SAVEKEY_ONMISSION - 1);
-}
-
-// -----------------------------------------------------------------------------------------
-// Returns the campaign number  --- apparently this is does alot less than it look like
-/// it now does even less than it looks like on the psx ... cause its pc only
-/// 2021-11: This appears to be useless, as scripts set the campaign number... Probably can & should remove this completely?
-UDWORD getCampaign(const char *fileName)
-{
-	GAME_SAVEHEADER fileHeader;
-	auto gamJson = readGamJson(fileName);
-	PHYSFS_file *fileHandle = openLoadFile(fileName, false);
-	if (!fileHandle)
-	{
-		// Failure to open the file *may NOT be* a failure to load the specified savegame
-		// TODO: If this really is needed, we need to add the new JSON format parsing here... but this whole function appears to be useless??
-		return false;
-	}
-
-	debug(LOG_WZ, "getCampaign: %s", fileName);
-
-	// Read the header from the file
-	if (!deserializeSaveGameHeader(fileHandle, &fileHeader))
-	{
-		debug(LOG_ERROR, "getCampaign: error while reading header from file (%s): %s", fileName, WZ_PHYSFS_getLastError());
-		PHYSFS_close(fileHandle);
-		return false;
-	}
-
-
-	// Check the header to see if we've been given a file of the right type
-	if (fileHeader.aFileType[0] != 'g'
-	    || fileHeader.aFileType[1] != 'a'
-	    || fileHeader.aFileType[2] != 'm'
-	    || fileHeader.aFileType[3] != 'e')
-	{
-		debug(LOG_ERROR, "getCampaign: Weird file type found? Has header letters - '%c' '%c' '%c' '%c' (should be 'g' 'a' 'm' 'e')",
-		      fileHeader.aFileType[0],
-		      fileHeader.aFileType[1],
-		      fileHeader.aFileType[2],
-		      fileHeader.aFileType[3]);
-
-		PHYSFS_close(fileHandle);
-
-		return false;
-	}
-
-	debug(LOG_NEVER, "gl .gam file is version %d\n", fileHeader.version);
-	
-	//set main version Id from game file
-	saveGameVersion = fileHeader.version;
-
-	debug(LOG_SAVE, "fileversion is %u, (%s) ", fileHeader.version, fileName);
-	/* Check the file version */
-	if (fileHeader.version < VERSION_14)
-	{
-		PHYSFS_close(fileHandle);
-		return 0;
-	}
-	
-
-	// what the arse bollocks is this
-	// the campaign number is fine prior to saving
-	// you save it out in a skirmish save and
-	// then don't bother putting it back in again
-	// when loading so it screws loads of stuff?!?
-	// don't check skirmish saves.
-	if (fileHeader.version <= CURRENT_VERSION_NUM)
-	{
-		UDWORD retVal = getCampaignV(fileHandle, fileHeader.version, gamJson);
-		PHYSFS_close(fileHandle);
-		return retVal;
-	}
-	else
-	{
-		debug(LOG_ERROR, "getCampaign: undefined save format version %d", fileHeader.version);
-		PHYSFS_close(fileHandle);
-
-		return 0;
-	}
-}
-
-// -----------------------------------------------------------------------------------------
 /* code specific to version 7 of a save game */
 bool gameLoadV7(PHYSFS_file *fileHandle, nonstd::optional<nlohmann::json> &gamJson)
 {
@@ -4108,39 +4017,9 @@ bool gameLoadV7(PHYSFS_file *fileHandle, nonstd::optional<nlohmann::json> &gamJs
 	//set IsScenario to true if not a user saved game
 	if (gameType == GTYPE_SAVE_START)
 	{
-		LEVEL_DATASET *psNewLevel;
-
-		IsScenario = false;
-		//copy the level name across
-		sstrcpy(aLevelName, saveGame.levelName);
-		//load up the level dataset
-		if (!levLoadData(aLevelName, nullptr, saveGameName, (GAME_TYPE)gameType))
-		{
-			return false;
-		}
-		// find the level dataset
-		psNewLevel = levFindDataSet(aLevelName);
-		if (psNewLevel == nullptr)
-		{
-			debug(LOG_ERROR, "gameLoadV7: couldn't find level data");
-
-			return false;
-		}
-		//check to see whether mission automatically starts
-		//shouldn't be able to be any other value at the moment!
-		if (psNewLevel->type == LEVEL_TYPE::LDS_CAMSTART
-		    || psNewLevel->type == LEVEL_TYPE::LDS_BETWEEN
-		    || psNewLevel->type == LEVEL_TYPE::LDS_EXPAND
-		    || psNewLevel->type == LEVEL_TYPE::LDS_EXPAND_LIMBO)
-		{
-			launchMission();
-		}
-
+		debug(LOG_FATAL, "Should not be called with gameType GTYPE_SAVE_START");
 	}
-	else
-	{
-		IsScenario = true;
-	}
+	IsScenario = true;
 
 	return true;
 }
@@ -4335,7 +4214,7 @@ bool gameLoadV(PHYSFS_file *fileHandle, unsigned int version, nonstd::optional<n
 				debug(LOG_ERROR, "failed to load gamjson");
 				return false;
 			}
-		} 
+		}
 		else
 		{
 			debug(LOG_SAVEGAME, "no gam json found, falling back to .gam");
@@ -4359,6 +4238,23 @@ bool gameLoadV(PHYSFS_file *fileHandle, unsigned int version, nonstd::optional<n
 	if (version >= VERSION_38)
 	{
 		setOverrideMods(saveGameData.modList);
+	}
+
+	if (game.type == LEVEL_TYPE::CAMPAIGN && hasOverrideMods())
+	{
+		// When loading campaign saves, if there are mods loaded (such as campaign mods),
+		// we *must* reload the search paths now (to ensure that levels in campaign mods can be found)
+		debug(LOG_SAVE, "Rebuilding level list with override mods loaded");
+
+		// Clear & reload level list, rebuilding search paths to include the override mods
+		levShutDown();
+		levInitialise();
+		rebuildSearchPath(mod_campaign, true);
+		pal_Init(); // Update palettes.
+		if (!buildMapList(true))
+		{
+			debug(LOG_FATAL, "Failed to build map / level list?");
+		}
 	}
 
 	// All savegames from version 34 or before are little endian so swap them. All
@@ -4591,6 +4487,18 @@ static bool loadMainFile(const std::string &fileName)
 	{
 		game.type = static_cast<LEVEL_TYPE>(save.value("gameType").toInt());
 	}
+	if (save.contains("campaignName"))
+	{
+		auto saveCampaignName = save.value("campaignName").toWzString();
+		if (!saveCampaignName.isEmpty())
+		{
+			setCampaignName(saveCampaignName.toStdString());
+		}
+		else
+		{
+			clearCampaignName();
+		}
+	}
 	if (save.contains("scavengers"))
 	{
 		auto saveScavValue = save.value("scavengers").toUInt();
@@ -4646,6 +4554,16 @@ static bool loadMainFile(const std::string &fileName)
 	if (save.contains("multiplayer"))
 	{
 		bMultiPlayer = save.value("multiplayer").toBool();
+	}
+	if (save.contains("tweakOptions"))
+	{
+		auto tweakOptionsJSON = save.value("tweakOptions").jsonValue();
+		std::unordered_map<std::string, nlohmann::json> tweakOptionsJSONMap;
+		for (auto it : tweakOptionsJSON.items())
+		{
+			tweakOptionsJSONMap[it.key()] = it.value();
+		}
+		setCamTweakOptions(tweakOptionsJSONMap);
 	}
 
 	save.beginArray("players");
@@ -4748,6 +4666,7 @@ static bool writeMainFile(const std::string &fileName, SDWORD saveType)
 	save.setValue("version", currentGameVersion); // game version save was made on
 	save.setValue("versionFile", 2); // version of this file. Bump for significant changes
 	save.setValue("saveKey", saveKey);
+	save.setValue("campaignName", getCampaignName());
 	save.setValue("gameTime", gameTime);
 	save.setValue("missionTime", mission.startTime);
 	save.setVector2i("scrollMin", Vector2i(scrollMinX, scrollMinY));
@@ -4874,6 +4793,7 @@ static bool writeMainFile(const std::string &fileName, SDWORD saveType)
 	save.setValue("inactivityMinutes", game.inactivityMinutes);
 	save.setValue("gameTimeLimitMinutes", game.gameTimeLimitMinutes);
 	save.setValue("playerLeaveMode", game.playerLeaveMode);
+	save.setValue("tweakOptions", getCamTweakOptions());
 
 	save.beginArray("scriptSetPlayerDataStrings");
 	for (size_t i = 0; i < NetPlay.scriptSetPlayerDataStrings.size(); ++i)
@@ -5058,7 +4978,7 @@ static bool writeGameFile(const char *fileName, SDWORD saveType)
 	const std::string fileNameStr(fileName);
 	const auto len = fileNameStr.size();
 	ASSERT(strcmp(fileName + (len - 4), ".gam") == 0, "hmm... not .gam?");
-	
+
 	const auto lastSep = fileNameStr.rfind("/");
 	// TODO: convert argument "const char* filename" to a manageable struct with path/filename/extension
 	//		 and remove this mess...
@@ -5463,7 +5383,7 @@ static void writeSaveObject(WzConfig &ini, const BASE_OBJECT *psObj)
 		ini.setValue("periodicalDamage", psObj->periodicalDamage);
 	}
 	ini.setValue("born", psObj->born);
-	if (psObj->died > 0)
+	if (psObj->died >= NOT_CURRENT_LIST)
 	{
 		ini.setValue("died", psObj->died);
 	}
@@ -5513,7 +5433,7 @@ static void writeSaveObjectJSON(nlohmann::json &jsonObj, const BASE_OBJECT *psOb
 		jsonObj["periodicalDamage"] = psObj->periodicalDamage;
 	}
 	jsonObj["born"] = psObj->born;
-	if (psObj->died > 0)
+	if (psObj->died >= NOT_CURRENT_LIST)
 	{
 		jsonObj["died"] = psObj->died;
 	}
@@ -5541,7 +5461,7 @@ inline T getCompFromName_NullCompOnFail(COMPONENT_TYPE compType, const WzString 
 	return (index >= 0) ? static_cast<T>(index) : 0; // 0 to reference the null weapon / body / etc
 }
 
-static bool loadSaveDroid(const char *pFileName, PerPlayerDroidLists& ppsCurrentDroidLists)
+static bool loadSaveDroid(const char *pFileName, PerPlayerDroidLists& ppsCurrentDroidLists, int& nextFreeGroupID)
 {
 	if (!PHYSFS_exists(pFileName))
 	{
@@ -5554,11 +5474,7 @@ static bool loadSaveDroid(const char *pFileName, PerPlayerDroidLists& ppsCurrent
 	// Sort list so transports are loaded first, since they must be loaded before the droids they contain.
 	std::vector<std::pair<int, WzString>> sortedList;
 	bool missionList = fName.compare("mdroid");
-	// This will be set to the largest group ID found throughout the droid file + 1.
-	//
-	// This helps to allocate non-conflicting group IDs for commanders which
-	// happen to lose their group, e.g. when transitioning from an offworld mission.
-	int nextFreeGroupID = 0;
+
 	for (size_t i = 0; i < list.size(); ++i)
 	{
 		ini.beginGroup(list[i]);
@@ -5698,6 +5614,7 @@ static bool loadSaveDroid(const char *pFileName, PerPlayerDroidLists& ppsCurrent
 		}
 
 		psDroid->group = ini.value("group", UBYTE_MAX).toInt();
+		psDroid->repairGroup = ini.value("repairGroup", UBYTE_MAX).toInt();
 		int aigroup = ini.value("aigroup", -1).toInt();
 		if (aigroup >= 0)
 		{
@@ -5751,6 +5668,43 @@ static bool loadSaveDroid(const char *pFileName, PerPlayerDroidLists& ppsCurrent
 		if (psDroid->isVtol() && psDroid->sMove.Status != MOVEINACTIVE)
 		{
 			psDroid->rot.pitch = 0;
+		}
+
+		// recreate formation if present
+		auto formationInfo = ini.value("formation").jsonValue();
+		if (formationInfo.is_object())
+		{
+			auto it_direction = formationInfo.find("direction");
+			auto it_x = formationInfo.find("x");
+			auto it_y = formationInfo.find("y");
+			if (it_direction != formationInfo.end()
+				&& it_x != formationInfo.end()
+				&& it_y != formationInfo.end())
+			{
+				auto formationX = json_variant(it_x.value()).toInt();
+				auto formationY = json_variant(it_y.value()).toInt();
+
+				psDroid->sMove.psFormation = formationFind(psDroid->player, formationX, formationY);
+				// join a formation if it exists at the destination
+				if (psDroid->sMove.psFormation)
+				{
+					formationJoin(psDroid->sMove.psFormation, psDroid);
+				}
+				else
+				{
+					// no formation so create a new one
+					auto formationDirection = json_variant(it_direction.value()).toUInt();
+					if (formationNew(&psDroid->sMove.psFormation, psDroid->player, FT_LINE, formationX, formationY,
+							static_cast<uint16_t>(formationDirection)))
+					{
+						formationJoin(psDroid->sMove.psFormation, psDroid);
+					}
+				}
+			}
+			else
+			{
+				ASSERT(false, "Missing one or more expected formation details");
+			}
 		}
 
 		// Recreate path-finding jobs
@@ -5861,7 +5815,8 @@ static nlohmann::json writeDroid(const DROID *psCurr, bool onMission, int &count
 		droidObj["aigroup/type"] = psCurr->psGroup->type;
 	}
 	droidObj["group"] = psCurr->group;	// different kind of group. of course.
-	if (hasCommander(psCurr) && psCurr->psGroup->psCommander->died <= 1)
+	droidObj["repairGroup"] = psCurr->repairGroup;
+	if (hasCommander(psCurr) && psCurr->psGroup->psCommander->died <= NOT_CURRENT_LIST)
 	{
 		droidObj["commander"] = psCurr->psGroup->psCommander->id;
 	}
@@ -5907,6 +5862,17 @@ static nlohmann::json writeDroid(const DROID *psCurr, bool onMission, int &count
 	droidObj["lastBump"] = psCurr->sMove.lastBump;
 	droidObj["pauseTime"] = psCurr->sMove.pauseTime;
 	droidObj["bumpPosition"] = psCurr->sMove.bumpPos.xy();
+
+	// formation info
+	if (psCurr->sMove.psFormation != nullptr)
+	{
+		auto formationObj = nlohmann::json::object();
+		formationObj["direction"] = psCurr->sMove.psFormation->direction;
+		formationObj["x"] = psCurr->sMove.psFormation->x;
+		formationObj["y"] = psCurr->sMove.psFormation->y;
+		droidObj["formation"] = std::move(formationObj);
+	}
+
 	droidObj["onMission"] = onMission;
 	return droidObj;
 }
@@ -6166,7 +6132,7 @@ static bool loadWzMapStructure(WzMap::Map& wzMap, std::unordered_map<UDWORD, UDW
 			NumberOfSkippedStructures++;
 		}
 		STRUCTURE *psStructure = nullptr;
-		debug(LOG_NEVER, "trying to build structure %i;%i;%s;%i;%i", (structure.id.has_value()) ? structure.id.value() : -1, player, 
+		debug(LOG_NEVER, "trying to build structure %i;%i;%s;%i;%i", (structure.id.has_value()) ? structure.id.value() : -1, player,
 				structure.name.c_str(), map_coord(structure.position.x), map_coord(structure.position.y));
 
 		uint32_t newID = generateSynchronisedObjectId();
@@ -6202,7 +6168,7 @@ static bool loadWzMapStructure(WzMap::Map& wzMap, std::unordered_map<UDWORD, UDW
 		}
 
 		// Previously, we would override building's ID with module's ID
-		// now, "id" is const, we can't do that. 
+		// now, "id" is const, we can't do that.
 		// this may break some mods which look up structures by theirs module id.
 		if (structure.modules > 0)
 		{
@@ -6341,7 +6307,7 @@ static bool loadSaveStructure2(const char *pFileName)
 				for (int moduleIdx = 0; moduleIdx < capacity; moduleIdx++)
 				{
 					buildStructure(psModule, psStructure->pos.x, psStructure->pos.y, psStructure->player, true);
-					
+
 				}
 			}
 			if (ini.contains("Factory/template"))
@@ -6352,7 +6318,7 @@ static bool loadSaveStructure2(const char *pFileName)
 			if (ini.contains("Factory/assemblyPoint/pos"))
 			{
 				Position point = ini.vector3i("Factory/assemblyPoint/pos");
-				setAssemblyPoint(psFactory->psAssemblyPoint, point.x, point.y, player, true);
+				setAssemblyPoint(psFactory->psAssemblyPoint, point.x, point.y, player, false);
 				psFactory->psAssemblyPoint->selected = ini.value("Factory/assemblyPoint/selected", false).toBool();
 			}
 			if (ini.contains("Factory/assemblyPoint/number"))
@@ -6385,6 +6351,7 @@ static bool loadSaveStructure2(const char *pFileName)
 					asProductionRun[psFactory->psAssemblyPoint->factoryType][psFactory->psAssemblyPoint->factoryInc].push_back(currentProd);
 				}
 			}
+			psStructure->productToGroup = ini.value("productToGroup", UBYTE_MAX).toInt();
 			break;
 		case REF_RESEARCH:
 			psResearch = ((RESEARCH_FACILITY *)psStructure->pFunctionality);
@@ -6427,7 +6394,7 @@ static bool loadSaveStructure2(const char *pFileName)
 			if (ini.contains("Repair/deliveryPoint/pos"))
 			{
 				Position point = ini.vector3i("Repair/deliveryPoint/pos");
-				setAssemblyPoint(psRepair->psDeliveryPoint, point.x, point.y, player, true);
+				setAssemblyPoint(psRepair->psDeliveryPoint, point.x, point.y, player, false);
 				psRepair->psDeliveryPoint->selected = ini.value("Repair/deliveryPoint/selected", false).toBool();
 			}
 			break;
@@ -6452,10 +6419,6 @@ static bool loadSaveStructure2(const char *pFileName)
 			{
 			case REF_POWER_GEN:
 				checkForResExtractors(psStructure);
-				if (selectedPlayer == psStructure->player)
-				{
-					audio_PlayObjStaticTrack(psStructure, ID_SOUND_POWER_HUM);
-				}
 				break;
 			case REF_RESOURCE_EXTRACTOR:
 				checkForPowerGen(psStructure);
@@ -6634,6 +6597,7 @@ bool writeStructFile(const char *pFileName)
 					{
 						ini.setValue("Factory/productionRuns", 0);
 					}
+					ini.setValue("productToGroup", psCurr->productToGroup);
 				}
 				else if (psCurr->pStructureType->type == REF_RESEARCH)
 				{
@@ -7294,9 +7258,9 @@ static bool writeTerrainTypeMapFile(char *pFileName)
 
 bool isComponentStateValid(int state)
 {
-    return state == UNAVAILABLE 
-        || state == AVAILABLE 
-        || state == FOUND 
+    return state == UNAVAILABLE
+        || state == AVAILABLE
+        || state == FOUND
         || state == REDUNDANT
         || state == REDUNDANT_FOUND
         || state == REDUNDANT_UNAVAILABLE;
@@ -7518,6 +7482,7 @@ bool loadSaveResearch(const char *pFileName)
 			int points = json_getValue(pointsList, plr).toInt();
 
 			psPlRes = &asPlayerResList[plr][statInc];
+			bool resAlreadyCompleted = IsResearchCompleted(psPlRes);
 			// Copy the research status
 			psPlRes->ResearchStatus = (researched & RESBITS_ALL);
 			SetResearchPossible(psPlRes, possible);
@@ -7525,7 +7490,14 @@ bool loadSaveResearch(const char *pFileName)
 			//for any research that has been completed - perform so that upgrade values are set up
 			if (researched == RESEARCHED)
 			{
-				researchResult(statInc, plr, false, nullptr, false);
+				if (!resAlreadyCompleted)
+				{
+					researchResult(statInc, plr, false, nullptr, false);
+				}
+				else
+				{
+					debug(LOG_INFO, "Player %d already completed research: %s - skipping re-apply", plr, name.toUtf8().c_str());
+				}
 			}
 		}
 		ini.endGroup();
@@ -7920,6 +7892,65 @@ bool loadScriptState(char *pFileName)
 	return true;
 }
 
+// -----------------------------------------------------------------------------------------
+// load / save the game guide topics
+static bool writeSaveGuideTopics(const char *pFileName)
+{
+	auto loadedTopics = saveLoadedGuideTopics();
+	nlohmann::json mRoot = nlohmann::json::object();
+	mRoot["loaded_topics"] = loadedTopics;
+
+	nlohmann::json options = nlohmann::json::object();
+	options["disable_topic_popups"] = getGameGuideDisableTopicPopups();
+	mRoot["options"] = std::move(options);
+
+	return saveJSONToFile(mRoot, pFileName);
+}
+
+static bool loadSaveGuideTopics(const char *pFileName)
+{
+	if (!PHYSFS_exists(pFileName))
+	{
+		return true; // older saves will have this file - expected
+	}
+
+	nonstd::optional<nlohmann::json> saveGuideTopicsOpt = parseJsonFile(pFileName);
+
+	if (!saveGuideTopicsOpt.has_value())
+	{
+		ASSERT(saveGuideTopicsOpt.has_value(), "guidetopics.json looks broken");
+		return false;
+	}
+
+	const auto& mRoot = saveGuideTopicsOpt.value();
+	ASSERT_OR_RETURN(false, mRoot.is_object(), "guidetopics.json looks broken - expected object");
+
+	auto it = mRoot.find("options");
+	if (it != mRoot.end() && it.value().is_object())
+	{
+		auto& options = it.value();
+		auto opt = options.find("disable_topic_popups");
+		if (opt != options.end() && opt.value().is_boolean())
+		{
+			setGameGuideDisableTopicPopups(opt.value().get<bool>());
+		}
+	}
+
+	it = mRoot.find("loaded_topics");
+	ASSERT_OR_RETURN(false, it != mRoot.end(), "guidetopics.json looks broken - missing expected \"loaded_topics\" key");
+
+	std::vector<std::string> loadedTopics;
+	try {
+		loadedTopics = it.value().get<std::vector<std::string>>();
+	}
+	catch (const std::exception &e) {
+		// Failed to parse the JSON
+		debug(LOG_ERROR, "JSON document from %s is invalid: %s", pFileName, e.what());
+		return false;
+	}
+
+	return restoreLoadedGuideTopics(loadedTopics);
+}
 
 // -----------------------------------------------------------------------------------------
 /* set the global scroll values to use for the save game */

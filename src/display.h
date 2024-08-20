@@ -54,8 +54,6 @@ void clearSelection();
 // deal with selecting a droid
 void dealWithDroidSelect(DROID *psDroid, bool bDragBox);
 
-bool isMouseOverRadar();
-
 void	setInvertMouseStatus(bool val);
 bool	getInvertMouseStatus();
 
@@ -184,7 +182,8 @@ extern void shakeStop();
 // reset the input state
 void resetInput();
 
-bool CheckInScrollLimits(SDWORD *xPos, SDWORD *zPos);
+bool CheckInScrollLimits(const int &xPos, const int &yPos);
+bool CheckInScrollLimitsCamera(SDWORD *xPos, SDWORD *zPos);
 bool CheckScrollLimits();
 
 BASE_OBJECT	*mouseTarget();

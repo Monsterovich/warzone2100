@@ -65,6 +65,7 @@
 #include "design.h"
 #include "advvis.h"
 #include "lighting.h" // for reInitPaletteAndFog()
+#include "move.h"
 
 #include "template.h"
 #include "lib/netplay/netplay.h"								// the netplay library.
@@ -121,15 +122,9 @@ void startMultiplayerGame();
 #define LAG_CHECK_INTERVAL 1000
 const std::chrono::milliseconds LagCheckInterval(LAG_CHECK_INTERVAL);
 
-static void sendTextMessage(const char* msg)
+void autoLagKickRoutine()
 {
-	auto message = InGameChatMessage(selectedPlayer, msg);
-	message.send();
-}
-
-static void autoLagKickRoutine()
-{
-	if (!NetPlay.isHost)
+	if (!bMultiPlayer || !NetPlay.bComms || !NetPlay.isHost)
 	{
 		return;
 	}
@@ -146,11 +141,20 @@ static void autoLagKickRoutine()
 		return;
 	}
 
+	const bool isLobby = ingame.localJoiningInProgress;
+	const bool isInitialLoad = !isLobby && !ingame.TimeEveryoneIsInGame.has_value();
+	uint32_t numPlayersLoaded = 0;
+	uint32_t totalNumPlayers = 0;
+
 	ingame.lastLagCheck = now;
-	uint32_t playerCheckLimit = (!ingame.TimeEveryoneIsInGame.has_value()) ? MAX_CONNECTED_PLAYERS : MAX_PLAYERS;
+	uint32_t playerCheckLimit = (isLobby || isInitialLoad) ? MAX_CONNECTED_PLAYERS : MAX_PLAYERS;
 	for (uint32_t i = 0; i < playerCheckLimit; ++i)
 	{
 		if (!isHumanPlayer(i))
+		{
+			continue;
+		}
+		if (i == NetPlay.hostPlayer)
 		{
 			continue;
 		}
@@ -158,12 +162,43 @@ static void autoLagKickRoutine()
 		{
 			continue;
 		}
-		bool isLagging = (ingame.PingTimes[i] >= PING_LIMIT);
-		bool isWaitingForInitialLoad = !ingame.TimeEveryoneIsInGame.has_value() && ingame.JoiningInProgress[i];
-		if (isWaitingForInitialLoad && (std::chrono::duration_cast<std::chrono::seconds>(now - ingame.startTime) < std::chrono::seconds(LAG_INITIAL_LOAD_GRACEPERIOD)))
+		if (i < MAX_PLAYERS)
 		{
-			isLagging = false;
-			isWaitingForInitialLoad = false;
+			++totalNumPlayers;
+			if (!ingame.JoiningInProgress[i])
+			{
+				++numPlayersLoaded;
+			}
+		}
+		bool isLagging = (ingame.PingTimes[i] >= PING_LIMIT);
+		bool isWaitingForInitialLoad = isInitialLoad && ingame.JoiningInProgress[i];
+		if (isWaitingForInitialLoad)
+		{
+			auto waitingForLoadTime = std::chrono::duration_cast<std::chrono::seconds>(now - ingame.startTime);
+			auto loadGracePeriod = std::chrono::seconds(LAG_INITIAL_LOAD_GRACEPERIOD);
+			if (i > MAX_PLAYERS)
+			{
+				// special handling for spectator slots:
+				// if all actual players are loaded
+				// - reduce the grace period for spectators to load
+				// - reduce the applicable auto lag kick time
+				if (totalNumPlayers > 0 && numPlayersLoaded == totalNumPlayers && i != NetPlay.hostPlayer)
+				{
+					loadGracePeriod = std::chrono::seconds(0);
+					LagAutoKickSeconds = std::min<int>(10, LagAutoKickSeconds); // (fine to set this here because any i after this will all be spectators)
+				}
+			}
+			if (waitingForLoadTime < loadGracePeriod)
+			{
+				// within grace period for initial load (some machines may take longer to load into the match)
+				isLagging = false;
+				isWaitingForInitialLoad = false;
+			}
+			else
+			{
+				// exceeded the grace period for initial load, and still waiting on this player to join
+				// treat them as lagging below
+			}
 		}
 		if (!isLagging && !isWaitingForInitialLoad)
 		{
@@ -174,11 +209,17 @@ static void autoLagKickRoutine()
 			continue;
 		}
 
+		if (ingame.PendingDisconnect[i])
+		{
+			// player already technically left, but we're still in the "pre-game" phase so the GAME_PLAYER_LEFT hasn't been processed yet
+			continue;
+		}
+
 		ingame.LagCounter[i]++;
 		if (ingame.LagCounter[i] >= LagAutoKickSeconds) {
 			std::string msg = astringf("Auto-kicking player %" PRIu32 " (\"%s\") because of ping issues. (Timeout: %u seconds)", i, getPlayerName(i), LagAutoKickSeconds);
 			debug(LOG_INFO, "%s", msg.c_str());
-			sendTextMessage(msg.c_str());
+			sendInGameSystemMessage(msg.c_str());
 			wz_command_interface_output("WZEVENT: lag-kick: %u %s\n", i, NetPlay.players[i].IPtextAddress);
 			kickPlayer(i, "Your connection was too laggy.", ERROR_CONNECTION, false);
 			ingame.LagCounter[i] = 0;
@@ -186,12 +227,12 @@ static void autoLagKickRoutine()
 		else if (ingame.LagCounter[i] >= (LagAutoKickSeconds - 3)) {
 			std::string msg = astringf("Auto-kicking player %" PRIu32 " (\"%s\") in %u seconds.", i, getPlayerName(i), (LagAutoKickSeconds - ingame.LagCounter[i]));
 			debug(LOG_INFO, "%s", msg.c_str());
-			sendTextMessage(msg.c_str());
+			sendInGameSystemMessage(msg.c_str());
 		}
 		else if (ingame.LagCounter[i] % 15 == 0) { // every 15 seconds
 			std::string msg = astringf("Auto-kicking player %" PRIu32 " (\"%s\") in %u seconds.", i, getPlayerName(i), (LagAutoKickSeconds - ingame.LagCounter[i]));
 			debug(LOG_INFO, "%s", msg.c_str());
-			sendTextMessage(msg.c_str());
+			sendInGameSystemMessage(msg.c_str());
 		}
 	}
 }
@@ -350,12 +391,15 @@ bool multiPlayerLoop()
 				{
 					if (ingame.DataIntegrity[index] == false && isHumanPlayer(index) && index != NetPlay.hostPlayer)
 					{
-						char msg[256] = {'\0'};
+						if (!ingame.PendingDisconnect[index])
+						{
+							char msg[256] = {'\0'};
 
-						snprintf(msg, sizeof(msg), _("Kicking player %s, because they tried to bypass data integrity check!"), getPlayerName(index));
-						sendInGameSystemMessage(msg);
-						addConsoleMessage(msg, LEFT_JUSTIFY, NOTIFY_MESSAGE);
-						NETlogEntry(msg, SYNC_FLAG, index);
+							snprintf(msg, sizeof(msg), _("Kicking player %s, because they tried to bypass data integrity check!"), getPlayerName(index));
+							sendInGameSystemMessage(msg);
+							addConsoleMessage(msg, LEFT_JUSTIFY, NOTIFY_MESSAGE);
+							NETlogEntry(msg, SYNC_FLAG, index);
+						}
 
 #ifndef DEBUG
 						kickPlayer(index, _("Invalid data!"), ERROR_INVALID, false);
@@ -779,9 +823,12 @@ static bool sendDataCheck2()
 				&& (std::chrono::duration_cast<std::chrono::seconds>(now - ingame.lastSentPlayerDataCheck2[player].value()) >= maxWaitSeconds))
 			{
 				// If it's after the allowed time, kick the player
-				std::string msg = astringf(_("%s (%u) has an incompatible mod, and has been kicked."), getPlayerName(player), player);
-				sendInGameSystemMessage(msg.c_str());
-				addConsoleMessage(msg.c_str(), LEFT_JUSTIFY, NOTIFY_MESSAGE);
+				if (!ingame.PendingDisconnect[player])
+				{
+					std::string msg = astringf(_("%s (%u) has an incompatible mod, and has been kicked."), getPlayerName(player), player);
+					sendInGameSystemMessage(msg.c_str());
+					addConsoleMessage(msg.c_str(), LEFT_JUSTIFY, NOTIFY_MESSAGE);
+				}
 
 				kickPlayer(player, _("Your data doesn't match the host's!"), ERROR_WRONGDATA, false);
 				debug(LOG_INFO, "%s (%u) did not respond with a NET_DATA_CHECK2 within the required timeframe (%s seconds), and has been kicked", getPlayerName(player), player, std::to_string(maxWaitSeconds.count()).c_str());
@@ -1219,6 +1266,9 @@ bool recvMessage()
 			case GAME_DEBUG_FINISH_RESEARCH:
 				recvResearch(queue);
 				break;
+			case GAME_SYNC_OPT_CHANGE:
+				recvSyncOptChange(queue);
+				break;
 			case REPLAY_ENDED:
 				if (!NETisReplay())
 				{
@@ -1465,7 +1515,6 @@ static bool recvResearch(NETQUEUE queue)
 
 	if (!IsResearchCompleted(pPlayerRes))
 	{
-		MakeResearchCompleted(pPlayerRes);
 		researchResult(index, player, false, nullptr, true);
 	}
 
@@ -1481,7 +1530,6 @@ static bool recvResearch(NETQUEUE queue)
 				if (!IsResearchCompleted(pPlayerRes))
 				{
 					// Do the research for that player
-					MakeResearchCompleted(pPlayerRes);
 					researchResult(index, i, false, nullptr, true);
 				}
 			}
