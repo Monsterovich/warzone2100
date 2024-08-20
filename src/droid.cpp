@@ -439,10 +439,6 @@ DROID::DROID(uint32_t id, unsigned player)
  */
 DROID::~DROID()
 {
-	// Make sure to get rid of some final references in the sound code to this object first
-	// In BASE_OBJECT::~BASE_OBJECT() is too late for this, since some callbacks require us to still be a DROID.
-	audio_RemoveObj(this);
-
 	DROID *psDroid = this;
 
 	if (psDroid->isTransporter())
@@ -833,7 +829,8 @@ void droidUpdate(DROID *psDroid)
 	if (psDroid->repairGroup != UBYTE_MAX &&
 		psDroid->order.type != DORDER_RTR &&
 		psDroid->order.type != DORDER_RTR_SPECIFIED &&
-		psDroid->order.type != DORDER_RTB)
+		psDroid->order.type != DORDER_RTB &&
+		secondaryGetState(psDroid, DSO_REPAIR_LEVEL) == DSS_REPLEV_NEVER)
 	{
 		droidWasFullyRepairedBase(psDroid);
 	}
@@ -2186,7 +2183,7 @@ bool calcDroidMuzzleBaseLocation(const DROID *psDroid, Vector3i *muzzle, int wea
 
 	CHECK_DROID(psDroid);
 
-	if (psBodyImd && !psBodyImd->connectors.empty())
+	if (psBodyImd && static_cast<size_t>(weapon_slot) < psBodyImd->connectors.size())
 	{
 		Vector3i barrel(0, 0, 0);
 

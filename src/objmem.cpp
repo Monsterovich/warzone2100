@@ -29,6 +29,7 @@
 #include "objects.h"
 #include "lib/gamelib/gtime.h"
 #include "lib/netplay/sync_debug.h"
+#include "lib/sound/audio.h"
 #include "hci.h"
 #include "map.h"
 #include "power.h"
@@ -85,12 +86,23 @@ bool objmemInitialise()
 	return true;
 }
 
+template<typename T>
+static void objMemShutdownContainerImpl(T& container)
+{
+	for (const auto& entity : container)
+	{
+		// Make sure to get rid of some final references in the sound code to this object first
+		audio_RemoveObj(&entity);
+	}
+	container.clear();
+}
+
 /* Release the object heaps */
 void objmemShutdown()
 {
-	GlobalDroidContainer().clear();
-	GlobalStructContainer().clear();
-	GlobalFeatureContainer().clear();
+	objMemShutdownContainerImpl(GlobalDroidContainer());
+	objMemShutdownContainerImpl(GlobalStructContainer());
+	objMemShutdownContainerImpl(GlobalFeatureContainer());
 }
 
 static const char* objTypeToStr(OBJECT_TYPE type)
@@ -184,13 +196,13 @@ static bool _checkStructReferences(BASE_OBJECT *psVictim, const StructureList& p
 				case REF_REPAIR_FACILITY:
 				{
 					REPAIR_FACILITY *psRepairFac = &psStruct->pFunctionality->repairFacility;
-					ASSERT_OR_RETURN_REPORT(false, psRepairFac->psObj != psVictim, "Illegal reference to p%d:%s:%" PRIu32 " (%s) in REPAIR_FACILITY.psObj in %s[%u] (state=%d)", (int)psVictim->player, objTypeToStr(psVictim->type), psVictim->id, getObjDebugDescriptiveName(psVictim), listName, player, (int)psRepairFac->state);
+					ASSERT_OR_RETURN_REPORT(false, psRepairFac->psObj != psVictim, "Illegal reference to p%d:%s:%" PRIu32 " (%s) in REPAIR_FACILITY.psObj in %s[%u] (state=%d) (struct.status: %d)", (int)psVictim->player, objTypeToStr(psVictim->type), psVictim->id, getObjDebugDescriptiveName(psVictim), listName, player, (int)psRepairFac->state, (int)psStruct->status);
 					break;
 				}
 				case REF_REARM_PAD:
 				{
 					REARM_PAD *psReArmPad = &psStruct->pFunctionality->rearmPad;
-					ASSERT_OR_RETURN_REPORT(false, psReArmPad->psObj != psVictim, "Illegal reference to p%d:%s:%" PRIu32 " (%s) in REARM_PAD.psObj in %s[%u]", (int)psVictim->player, objTypeToStr(psVictim->type), psVictim->id, getObjDebugDescriptiveName(psVictim), listName, player);
+					ASSERT_OR_RETURN_REPORT(false, psReArmPad->psObj != psVictim, "Illegal reference to p%d:%s:%" PRIu32 " (%s) in REARM_PAD.psObj in %s[%u] (struct.status: %d)", (int)psVictim->player, objTypeToStr(psVictim->type), psVictim->id, getObjDebugDescriptiveName(psVictim), listName, player, (int)psStruct->status);
 					break;
 				}
 				default:
@@ -266,6 +278,10 @@ bool objmemDestroy(BASE_OBJECT *psObj, bool checkRefs)
 	default:
 		ASSERT(!"unknown object type", "unknown object type in destroyed list at 0x%p", static_cast<void *>(psObj));
 	}
+
+	// Make sure to get rid of some final references in the sound code to this object first
+	audio_RemoveObj(psObj);
+
 	if (checkRefs && !checkReferences(psObj))
 	{
 		return false;

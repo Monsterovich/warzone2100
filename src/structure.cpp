@@ -990,12 +990,54 @@ void structureBuild(STRUCTURE *psStruct, DROID *psDroid, int buildPoints, int bu
 
 			switch (psStruct->pStructureType->type)
 			{
+			case REF_FACTORY:
+			case REF_CYBORG_FACTORY:
+			case REF_VTOL_FACTORY:
+			{
+				if (psStruct->pFunctionality)
+				{
+					FACTORY *psFactory = &psStruct->pFunctionality->factory;
+					if (psFactory->psCommander)
+					{
+						//remove the commander from the factory
+						syncDebugDroid(psFactory->psCommander, '-');
+						assignFactoryCommandDroid(psStruct, nullptr);
+					}
+				}
+				break;
+			}
 			case REF_POWER_GEN:
 				releasePowerGen(psStruct);
 				break;
 			case REF_RESOURCE_EXTRACTOR:
 				releaseResExtractor(psStruct);
 				break;
+			case REF_REPAIR_FACILITY:
+			{
+				if (psStruct->pFunctionality)
+				{
+					REPAIR_FACILITY	*psRepairFac = &psStruct->pFunctionality->repairFacility;
+					if (psRepairFac->psObj)
+					{
+						psRepairFac->psObj = nullptr;
+						psRepairFac->state = RepairState::Idle;
+					}
+				}
+				break;
+			}
+			case REF_REARM_PAD:
+			{
+				if (psStruct->pFunctionality)
+				{
+					REARM_PAD *psReArmPad = &psStruct->pFunctionality->rearmPad;
+					if (psReArmPad->psObj)
+					{
+						// Possible TODO: Need to do anything with the droid? (order it to find a new place to rearm?)
+						psReArmPad->psObj = nullptr;
+					}
+				}
+				break;
+			}
 			default:
 				break;
 			}
@@ -3749,7 +3791,8 @@ void structureUpdate(STRUCTURE *psBuilding, bool bMission)
 			psBuilding->animationEvent = ANIM_EVENT_NONE;
 		}
 		else if (psBuilding->pFunctionality->resourceExtractor.psPowerGen
-		         && psBuilding->animationEvent == ANIM_EVENT_NONE) // we have a power generator, but no animation
+		         && psBuilding->animationEvent == ANIM_EVENT_NONE // we have a power generator, but no animation
+		         && psBuilding->sDisplay.imd != nullptr)
 		{
 			psBuilding->animationEvent = ANIM_EVENT_ACTIVE;
 
@@ -3893,7 +3936,7 @@ void structureUpdate(STRUCTURE *psBuilding, bool bMission)
 			                                                 aDefaultRepair[psBuilding->player]].time);
 
 			//add the blue flashing effect for multiPlayer
-			if (bMultiPlayer && ONEINTEN && !bMission)
+			if (bMultiPlayer && ONEINTEN && !bMission && psBuilding->sDisplay.imd)
 			{
 				Vector3i position;
 				Vector3f *point;
@@ -3950,9 +3993,6 @@ STRUCTURE::STRUCTURE(uint32_t id, unsigned player)
 /* Release all resources associated with a structure */
 STRUCTURE::~STRUCTURE()
 {
-	// Make sure to get rid of some final references in the sound code to this object first
-	audio_RemoveObj(this);
-
 	STRUCTURE *psBuilding = this;
 
 	// free up the space used by the functionality array
